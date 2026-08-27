@@ -9,19 +9,23 @@ import {
   type EmbedConfig,
   type GeneratedMetadata,
   type IngestSummary,
+  type KeywordConfig,
   type LimiterProfile,
   type ProviderKind,
   DEFAULT_ANALYSIS_CONFIG,
   DEFAULT_EMBED_CONFIG,
+  DEFAULT_KEYWORD_CONFIG,
   analyzeAsset,
   assetCount,
   checkExiftool,
   embedAssetMetadata,
+  enrichKeywords,
   exportMetadataCsv,
   generateMetadata,
   getAnalysis,
   getAnalysisConfig,
   getEmbedConfig,
+  getKeywordConfig,
   getLimiterProfile,
   getMetadata,
   ingestFiles,
@@ -31,6 +35,7 @@ import {
   onAssetsIngested,
   setAnalysisConfig,
   setEmbedConfig,
+  setKeywordConfig,
   setLimiterProfile,
   startWatch,
   stopWatch,
@@ -124,6 +129,13 @@ export default function App() {
   const [exiftoolStatus, setExiftoolStatus] = useState<string>("checking…");
   const [embedding, setEmbedding] = useState<Record<number, boolean>>({});
 
+  // --- SPHIN-5 keyword enrichment state ---
+  const [keywordConfig, setKeywordConfigState] = useState<KeywordConfig>(DEFAULT_KEYWORD_CONFIG);
+  const [keywordConfigReady, setKeywordConfigReady] = useState(false);
+  const [keywordConfigDirty, setKeywordConfigDirty] = useState(false);
+  const [showKeywordConfig, setShowKeywordConfig] = useState(false);
+  const [enriching, setEnriching] = useState<Record<number, boolean>>({});
+
   const refresh = useCallback(async () => {
     const [rows, count] = await Promise.all([listAssets(200, 0), assetCount()]);
     setAssets(rows);
@@ -194,6 +206,15 @@ export default function App() {
       })
       .catch(() => setEmbedConfigReady(true));
   }, [runExiftoolCheck]);
+
+  useEffect(() => {
+    getKeywordConfig(PROJECT_ID)
+      .then((saved) => {
+        setKeywordConfigState(saved ?? DEFAULT_KEYWORD_CONFIG);
+        setKeywordConfigReady(true);
+      })
+      .catch(() => setKeywordConfigReady(true));
+  }, []);
 
   // Backfill stored metadata for any assets we haven't loaded one for yet.
   const loadedMetadataIds = useRef<Set<number>>(new Set());
@@ -411,6 +432,68 @@ export default function App() {
     }
   }
 
+  function toggleShutterstock(enabled: boolean) {
+    setKeywordConfigState((prev) => ({
+      ...prev,
+      shutterstock: enabled ? (prev.shutterstock ?? { api_key: "", base_url: "" }) : null,
+    }));
+    setKeywordConfigDirty(true);
+  }
+
+  function toggleAdobeStock(enabled: boolean) {
+    setKeywordConfigState((prev) => ({
+      ...prev,
+      adobe_stock: enabled ? (prev.adobe_stock ?? { api_key: "", base_url: "" }) : null,
+    }));
+    setKeywordConfigDirty(true);
+  }
+
+  function patchShutterstockKey(api_key: string) {
+    setKeywordConfigState((prev) => ({
+      ...prev,
+      shutterstock: prev.shutterstock ? { ...prev.shutterstock, api_key } : { api_key, base_url: "" },
+    }));
+    setKeywordConfigDirty(true);
+  }
+
+  function patchAdobeStockKey(api_key: string) {
+    setKeywordConfigState((prev) => ({
+      ...prev,
+      adobe_stock: prev.adobe_stock ? { ...prev.adobe_stock, api_key } : { api_key, base_url: "" },
+    }));
+    setKeywordConfigDirty(true);
+  }
+
+  async function handleSaveKeywordConfig() {
+    try {
+      await setKeywordConfig(PROJECT_ID, keywordConfig);
+      setKeywordConfigDirty(false);
+      setStatus("Saved keyword-enrichment configuration.");
+    } catch (err) {
+      setStatus(`Could not save keyword-enrichment configuration: ${String(err)}`);
+    }
+  }
+
+  const hasKeywordProvider = Boolean(keywordConfig.shutterstock || keywordConfig.adobe_stock);
+
+  async function handleEnrich(asset: Asset) {
+    setEnriching((prev) => ({ ...prev, [asset.id]: true }));
+    try {
+      const { result, added, errors } = await enrichKeywords(PROJECT_ID, asset.id);
+      setGenerated((prev) => ({ ...prev, [asset.id]: result }));
+      setExpanded((prev) => ({ ...prev, [asset.id]: true }));
+      const parts = [
+        added.length ? `added ${added.length} keyword${added.length === 1 ? "" : "s"}` : "no new keywords",
+      ];
+      if (errors.length) parts.push(`errors: ${errors.join("; ")}`);
+      setStatus(`Enrichment: ${parts.join(" · ")}`);
+    } catch (err) {
+      setStatus(`Enrichment failed: ${String(err)}`);
+    } finally {
+      setEnriching((prev) => ({ ...prev, [asset.id]: false }));
+    }
+  }
+
   async function handleAnalyze(asset: Asset) {
     setAnalyzing((prev) => ({ ...prev, [asset.id]: true }));
     setStatus(`Analyzing ${asset.path.split(/[\\/]/).pop()}…`);
@@ -433,7 +516,7 @@ export default function App() {
         <h1>Sphinx</h1>
         <p className="subtitle">
           Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3) ·
-          Metadata embedding (SPHIN-4)
+          Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5)
         </p>
       </header>
 
@@ -642,6 +725,75 @@ export default function App() {
         )}
       </section>
 
+      <section className="analysis-config">
+        <div className="analysis-config-head">
+          <h2>
+            Keyword enrichment{" "}
+            <span className="count">
+              ·{" "}
+              {keywordConfigReady
+                ? hasKeywordProvider
+                  ? [keywordConfig.shutterstock && "Shutterstock", keywordConfig.adobe_stock && "Adobe Stock"]
+                      .filter(Boolean)
+                      .join(" + ")
+                  : "not configured"
+                : "loading…"}
+            </span>
+          </h2>
+          <button onClick={() => setShowKeywordConfig((v) => !v)}>
+            {showKeywordConfig ? "Hide" : "Configure"}
+          </button>
+        </div>
+
+        {showKeywordConfig && (
+          <div className="config-form">
+            <label>
+              <input
+                type="checkbox"
+                checked={keywordConfig.shutterstock !== null}
+                onChange={(e) => toggleShutterstock(e.target.checked)}
+              />{" "}
+              Shutterstock
+            </label>
+            {keywordConfig.shutterstock && (
+              <label>
+                Shutterstock API token
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={keywordConfig.shutterstock.api_key}
+                  onChange={(e) => patchShutterstockKey(e.target.value)}
+                />
+              </label>
+            )}
+            <label>
+              <input
+                type="checkbox"
+                checked={keywordConfig.adobe_stock !== null}
+                onChange={(e) => toggleAdobeStock(e.target.checked)}
+              />{" "}
+              Adobe Stock
+            </label>
+            {keywordConfig.adobe_stock && (
+              <label>
+                Adobe Stock API key
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={keywordConfig.adobe_stock.api_key}
+                  onChange={(e) => patchAdobeStockKey(e.target.value)}
+                />
+              </label>
+            )}
+            <div className="config-actions">
+              <button onClick={handleSaveKeywordConfig} disabled={!keywordConfigDirty} className="btn-active">
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <section className="assets">
         <div className="analysis-config-head">
           <h2>
@@ -739,6 +891,19 @@ export default function App() {
                             ) : (
                               <button className="link-btn" onClick={() => handleEmbed(asset)}>
                                 Embed
+                              </button>
+                            ))}
+                          {meta &&
+                            (enriching[asset.id] ? (
+                              <span className="muted">enriching…</span>
+                            ) : (
+                              <button
+                                className="link-btn"
+                                disabled={!hasKeywordProvider}
+                                title={!hasKeywordProvider ? "Configure a keyword provider first" : ""}
+                                onClick={() => handleEnrich(asset)}
+                              >
+                                Enrich
                               </button>
                             ))}
                         </>

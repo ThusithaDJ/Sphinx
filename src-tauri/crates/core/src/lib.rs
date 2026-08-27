@@ -12,6 +12,8 @@
 //!   analysis output plus per-site limiter profiles.
 //! - [`embed`] — SPHIN-4, writing metadata into the file as IPTC/XMP via
 //!   exiftool, plus CSV export for manual review/upload.
+//! - [`keywords`] — SPHIN-5, keyword enrichment via the Shutterstock and
+//!   Adobe Stock APIs (the local lookup cache lives in [`db`]).
 
 pub mod analysis;
 pub mod db;
@@ -19,6 +21,7 @@ pub mod embed;
 pub mod error;
 pub mod hash;
 pub mod ingest;
+pub mod keywords;
 pub mod metadata;
 pub mod models;
 pub mod watch;

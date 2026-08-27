@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use sphinx_core::analysis::{AnalysisConfig, AnalysisResult};
 use sphinx_core::embed::{EmbedConfig, EmbedOutcome, ExportRow};
+use sphinx_core::keywords::{AdobeStockProvider, KeywordConfig, KeywordProvider, ShutterstockProvider};
 use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
 use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, MetadataRecord, Project};
 use sphinx_core::watch::WatchHandle;
@@ -473,6 +474,181 @@ fn export_metadata_csv(
     std::fs::write(&target_path, embed::export_csv(&rows)).map_err(|e| e.to_string())
 }
 
+// --- keyword enrichment (SPHIN-5) --------------------------------------------
+
+const KEYWORD_CACHE_TTL_DAYS: i64 = 30;
+
+fn non_empty(s: &str) -> Option<&str> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
+}
+
+#[tauri::command]
+fn get_keyword_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Option<KeywordConfig>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_keyword_config(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_keyword_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    config: KeywordConfig,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_keyword_config(&conn, project_id, &config).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Serialize)]
+struct EnrichResponse {
+    record_id: i64,
+    result: GeneratedMetadata,
+    added: Vec<String>,
+    errors: Vec<String>,
+}
+
+/// Enrich the asset's generated keywords with per-site suggestions from
+/// whichever providers are configured (Shutterstock, Adobe Stock), seeded
+/// from the asset's first generated keyword (or its title if it has none),
+/// and respecting each site's rate limits via a local cache (SPHIN-24). A
+/// single connector failing doesn't fail the whole call -- its error is
+/// reported in `errors` and the other connector's suggestions still land.
+/// SPHIN-5 (22/23/24). Runs the network calls on the blocking thread pool.
+#[tauri::command]
+async fn enrich_keywords(
+    state: tauri::State<'_, AppState>,
+    project_id: i64,
+    asset_id: i64,
+) -> Result<EnrichResponse, String> {
+    let (record, config, existing_keywords, seed, limiter, mut collected) = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        let record = db::latest_metadata_for_asset(&conn, asset_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "metadata has not been generated yet".to_string())?;
+        let config = db::get_keyword_config(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        if config.shutterstock.is_none() && config.adobe_stock.is_none() {
+            return Err("no keyword-enrichment provider configured for this project".to_string());
+        }
+        let existing_keywords = metadata_from_record(&record)?.keywords;
+        let seed = existing_keywords
+            .first()
+            .cloned()
+            .unwrap_or_else(|| record.title.clone());
+        let limiter = db::get_limiter_profile(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+
+        let mut collected: Vec<(String, Vec<String>)> = Vec::new();
+        if config.shutterstock.is_some() {
+            if let Some(kw) =
+                db::get_cached_keywords(&conn, &seed, "shutterstock", KEYWORD_CACHE_TTL_DAYS)
+                    .map_err(|e| e.to_string())?
+            {
+                collected.push(("shutterstock".to_string(), kw));
+            }
+        }
+        if config.adobe_stock.is_some() {
+            if let Some(kw) =
+                db::get_cached_keywords(&conn, &seed, "adobe_stock", KEYWORD_CACHE_TTL_DAYS)
+                    .map_err(|e| e.to_string())?
+            {
+                collected.push(("adobe_stock".to_string(), kw));
+            }
+        }
+        (record, config, existing_keywords, seed, limiter, collected)
+    };
+
+    let already_cached: std::collections::HashSet<String> =
+        collected.iter().map(|(name, _)| name.clone()).collect();
+    let seed_for_fetch = seed.clone();
+    let config_for_fetch = config.clone();
+
+    let (fetched, errors): (Vec<(String, Vec<String>)>, Vec<String>) =
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut fetched = Vec::new();
+            let mut errors = Vec::new();
+
+            if let Some(creds) = &config_for_fetch.shutterstock {
+                if !already_cached.contains("shutterstock") {
+                    let outcome =
+                        ShutterstockProvider::new(creds.api_key.clone(), non_empty(&creds.base_url))
+                            .and_then(|p| p.suggest(&seed_for_fetch, 15));
+                    match outcome {
+                        Ok(kw) => fetched.push(("shutterstock".to_string(), kw)),
+                        Err(e) => errors.push(format!("shutterstock: {e}")),
+                    }
+                }
+            }
+            if let Some(creds) = &config_for_fetch.adobe_stock {
+                if !already_cached.contains("adobe_stock") {
+                    let outcome =
+                        AdobeStockProvider::new(creds.api_key.clone(), non_empty(&creds.base_url))
+                            .and_then(|p| p.suggest(&seed_for_fetch, 15));
+                    match outcome {
+                        Ok(kw) => fetched.push(("adobe_stock".to_string(), kw)),
+                        Err(e) => errors.push(format!("adobe_stock: {e}")),
+                    }
+                }
+            }
+            (fetched, errors)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+    collected.extend(fetched.iter().cloned());
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    for (provider, kw) in &fetched {
+        let _ = db::set_cached_keywords(&conn, &seed, provider, kw);
+    }
+
+    let mut seen: std::collections::HashSet<String> =
+        existing_keywords.iter().map(|k| k.to_lowercase()).collect();
+    let mut merged = existing_keywords.clone();
+    let mut added = Vec::new();
+    'outer: for (_, kw_list) in &collected {
+        for kw in kw_list {
+            if merged.len() >= limiter.max_keywords {
+                break 'outer;
+            }
+            let lower = kw.to_lowercase();
+            if lower.is_empty() || lower.chars().count() > limiter.max_keyword_chars {
+                continue;
+            }
+            if seen.insert(lower) {
+                merged.push(kw.clone());
+                added.push(kw.clone());
+            }
+        }
+    }
+
+    let meets_minimum_keywords = merged.len() >= limiter.min_keywords;
+    let enriched = GeneratedMetadata {
+        title: record.title.clone(),
+        description: record.description.clone(),
+        keywords: merged,
+        profile: record.profile.clone(),
+        meets_minimum_keywords,
+    };
+    let saved = db::insert_metadata(&conn, asset_id, &enriched).map_err(|e| e.to_string())?;
+
+    Ok(EnrichResponse {
+        record_id: saved.id,
+        result: enriched,
+        added,
+        errors,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -513,6 +689,9 @@ pub fn run() {
             check_exiftool,
             embed_asset_metadata,
             export_metadata_csv,
+            get_keyword_config,
+            set_keyword_config,
+            enrich_keywords,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

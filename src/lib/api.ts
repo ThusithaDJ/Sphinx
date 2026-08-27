@@ -233,3 +233,46 @@ export function exportMetadataCsv(
 ): Promise<void> {
   return invoke("export_metadata_csv", { assetIds, targetPath });
 }
+
+// --- SPHIN-5: keyword enrichment (Shutterstock / Adobe Stock) ---------------
+
+export interface SiteCredentials {
+  api_key: string;
+  /** Empty string => use the provider's default base URL. */
+  base_url: string;
+}
+
+export interface KeywordConfig {
+  shutterstock: SiteCredentials | null;
+  adobe_stock: SiteCredentials | null;
+}
+
+export const DEFAULT_KEYWORD_CONFIG: KeywordConfig = {
+  shutterstock: null,
+  adobe_stock: null,
+};
+
+export interface EnrichResponse {
+  record_id: number;
+  result: GeneratedMetadata;
+  added: string[];
+  errors: string[];
+}
+
+export function getKeywordConfig(projectId: number): Promise<KeywordConfig | null> {
+  return invoke("get_keyword_config", { projectId });
+}
+
+export function setKeywordConfig(
+  projectId: number,
+  config: KeywordConfig
+): Promise<void> {
+  return invoke("set_keyword_config", { projectId, config });
+}
+
+export function enrichKeywords(
+  projectId: number,
+  assetId: number
+): Promise<EnrichResponse> {
+  return invoke("enrich_keywords", { projectId, assetId });
+}

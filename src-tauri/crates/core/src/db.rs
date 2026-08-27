@@ -6,10 +6,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::analysis::AnalysisConfig;
 use crate::embed::EmbedConfig;
 use crate::error::Result;
+use crate::keywords::KeywordConfig;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
 use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project};
 
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// Key under which the per-project analysis config JSON is stored in
 /// `project_settings`.
@@ -22,6 +23,10 @@ const LIMITER_PROFILE_KEY: &str = "limiter_profile";
 /// Key under which the per-project embed config JSON is stored in
 /// `project_settings` (SPHIN-20).
 const EMBED_CONFIG_KEY: &str = "embed_config";
+
+/// Key under which the per-project keyword-enrichment config JSON is stored
+/// in `project_settings` (SPHIN-5).
+const KEYWORD_CONFIG_KEY: &str = "keyword_config";
 
 /// Open (creating if needed) the SQLite database at `path` and run migrations.
 pub fn open(path: impl AsRef<Path>) -> Result<Connection> {
@@ -69,6 +74,9 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if current < 3 {
         migrate_v3(conn)?;
+    }
+    if current < 4 {
+        migrate_v4(conn)?;
     }
 
     conn.execute(
@@ -182,6 +190,24 @@ fn migrate_v3(conn: &Connection) -> Result<()> {
         );
 
         CREATE INDEX IF NOT EXISTS idx_metadata_asset_id ON metadata(asset_id);
+        "#,
+    )?;
+    Ok(())
+}
+
+/// v4 (SPHIN-5): local cache of per-site keyword suggestions, keyed by
+/// normalized seed term + provider, so repeated lookups don't burn through
+/// each API's rate limit (SPHIN-24).
+fn migrate_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS keyword_cache (
+            seed          TEXT NOT NULL,
+            provider      TEXT NOT NULL,
+            keywords_json TEXT NOT NULL,
+            fetched_at    TEXT NOT NULL,
+            PRIMARY KEY (seed, provider)
+        );
         "#,
     )?;
     Ok(())
@@ -493,6 +519,81 @@ pub fn set_embed_config(conn: &Connection, project_id: i64, config: &EmbedConfig
     set_project_setting(conn, project_id, EMBED_CONFIG_KEY, &json)
 }
 
+/// The per-project keyword-enrichment configuration (SPHIN-5), or `None` if
+/// the project has never had one saved (callers should fall back to
+/// [`KeywordConfig::default`], which enables no connectors).
+pub fn get_keyword_config(conn: &Connection, project_id: i64) -> Result<Option<KeywordConfig>> {
+    match get_project_setting(conn, project_id, KEYWORD_CONFIG_KEY)? {
+        Some(json) => Ok(Some(serde_json::from_str(&json)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn set_keyword_config(
+    conn: &Connection,
+    project_id: i64,
+    config: &KeywordConfig,
+) -> Result<()> {
+    let json = serde_json::to_string(config)?;
+    set_project_setting(conn, project_id, KEYWORD_CONFIG_KEY, &json)
+}
+
+// --- keyword cache (SPHIN-24) -------------------------------------------------
+
+fn normalize_seed(seed: &str) -> String {
+    seed.trim().to_lowercase()
+}
+
+/// Cached keyword suggestions for `seed` from `provider`, if fetched within
+/// the last `ttl_days` days. A missing entry, an unparsable one, or one past
+/// its TTL are all treated as a plain cache miss (`Ok(None)`) rather than an
+/// error -- the caller should just fetch fresh.
+pub fn get_cached_keywords(
+    conn: &Connection,
+    seed: &str,
+    provider: &str,
+    ttl_days: i64,
+) -> Result<Option<Vec<String>>> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT keywords_json, fetched_at FROM keyword_cache WHERE seed = ?1 AND provider = ?2",
+            params![normalize_seed(seed), provider],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+
+    let Some((json, fetched_at)) = row else {
+        return Ok(None);
+    };
+    let Ok(fetched) = chrono::DateTime::parse_from_rfc3339(&fetched_at) else {
+        return Ok(None);
+    };
+    let age = Utc::now().signed_duration_since(fetched.with_timezone(&Utc));
+    if age > chrono::Duration::days(ttl_days) {
+        return Ok(None);
+    }
+    Ok(serde_json::from_str(&json).ok())
+}
+
+pub fn set_cached_keywords(
+    conn: &Connection,
+    seed: &str,
+    provider: &str,
+    keywords: &[String],
+) -> Result<()> {
+    let json = serde_json::to_string(keywords)?;
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO keyword_cache (seed, provider, keywords_json, fetched_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(seed, provider) DO UPDATE SET
+            keywords_json = excluded.keywords_json,
+            fetched_at = excluded.fetched_at",
+        params![normalize_seed(seed), provider, json, now],
+    )?;
+    Ok(())
+}
+
 // --- metadata (SPHIN-3) ------------------------------------------------------
 
 pub fn insert_metadata(
@@ -736,6 +837,65 @@ mod tests {
 
         let back = get_embed_config(&conn, 1).unwrap().unwrap();
         assert_eq!(back.exiftool_path, "C:\\Tools\\exiftool.exe");
+    }
+
+    #[test]
+    fn keyword_config_roundtrips_per_project() {
+        use crate::keywords::{KeywordConfig, SiteCredentials};
+
+        let conn = open_in_memory().unwrap();
+        assert!(get_keyword_config(&conn, 1).unwrap().is_none());
+
+        let config = KeywordConfig {
+            shutterstock: Some(SiteCredentials {
+                api_key: "sk-1".into(),
+                base_url: String::new(),
+            }),
+            adobe_stock: None,
+        };
+        set_keyword_config(&conn, 1, &config).unwrap();
+
+        let back = get_keyword_config(&conn, 1).unwrap().unwrap();
+        assert_eq!(back.shutterstock.unwrap().api_key, "sk-1");
+        assert!(back.adobe_stock.is_none());
+    }
+
+    #[test]
+    fn keyword_cache_roundtrips_and_normalizes_the_seed() {
+        let conn = open_in_memory().unwrap();
+        assert!(get_cached_keywords(&conn, "Dog Park", "shutterstock", 30)
+            .unwrap()
+            .is_none());
+
+        let kw = vec!["dog".to_string(), "park".to_string()];
+        set_cached_keywords(&conn, "Dog Park", "shutterstock", &kw).unwrap();
+
+        // Case/whitespace-insensitive lookup.
+        let back = get_cached_keywords(&conn, "  dog park  ", "shutterstock", 30)
+            .unwrap()
+            .unwrap();
+        assert_eq!(back, kw);
+
+        // A different provider for the same seed is a separate entry.
+        assert!(get_cached_keywords(&conn, "Dog Park", "adobe_stock", 30)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn keyword_cache_expires_past_its_ttl() {
+        let conn = open_in_memory().unwrap();
+        let stale = Utc::now() - chrono::Duration::days(40);
+        conn.execute(
+            "INSERT INTO keyword_cache (seed, provider, keywords_json, fetched_at)
+             VALUES ('dog', 'shutterstock', '[\"dog\"]', ?1)",
+            params![stale.to_rfc3339()],
+        )
+        .unwrap();
+
+        assert!(get_cached_keywords(&conn, "dog", "shutterstock", 30)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
