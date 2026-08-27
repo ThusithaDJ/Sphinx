@@ -1,0 +1,118 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.75rem;
+}
+
+.subtitle {
+  margin: 0.15rem 0 1.5rem;
+  color: #888;
+  font-size: 0.95rem;
+}
+
+.dropzone {
+  border: 2px dashed #888;
+  border-radius: 12px;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropzone--active {
+  border-color: #4f8cff;
+  background-color: rgba(79, 140, 255, 0.08);
+}
+
+.dropzone p {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+}
+
+.dropzone-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #666;
+  background: transparent;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.btn-active {
+  border-color: #4f8cff;
+  color: #4f8cff;
+}
+
+.status {
+  min-height: 1.4em;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.assets h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.count {
+  color: #888;
+  font-weight: normal;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+td.path {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+td.hash {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.empty {
+  text-align: center;
+  color: #888;
+  padding: 1.5rem 0;
+}

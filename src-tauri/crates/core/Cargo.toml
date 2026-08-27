@@ -1,0 +1,19 @@
+[package]
+name = "sphinx-core"
+version = "0.1.0"
+edition = "2021"
+description = "Sphinx ingestion & data layer: hashing, dedupe, SQLite schema, folder watching. No GUI/Tauri deps so it can be built and tested standalone."
+
+[dependencies]
+rusqlite = { version = "=0.31.0", features = ["bundled"] }
+blake3 = "=1.5.4"
+notify = "=6.1.1"
+notify-debouncer-mini = "=0.4.1"
+walkdir = "=2.5.0"
+serde = { version = "=1.0.204", features = ["derive"] }
+serde_json = "=1.0.120"
+chrono = { version = "=0.4.38", features = ["serde"] }
+thiserror = "=1.0.63"
+
+[dev-dependencies]
+tempfile = "=3.10.1"
