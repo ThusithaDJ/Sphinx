@@ -276,3 +276,52 @@ export function enrichKeywords(
 ): Promise<EnrichResponse> {
   return invoke("enrich_keywords", { projectId, assetId });
 }
+
+// --- SPHIN-7: job orchestration ---------------------------------------------
+
+export type QueueJobType = "analyze" | "generate_metadata" | "embed" | "enrich_keywords";
+
+export interface Job {
+  id: number;
+  asset_id: number;
+  job_type: string;
+  status: string;
+  error: string | null;
+  source: string;
+  payload_json: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobCounts {
+  pending: number;
+  running: number;
+  done: number;
+  failed: number;
+}
+
+export function enqueueBatch(
+  projectId: number,
+  assetIds: number[],
+  jobType: QueueJobType
+): Promise<Job[]> {
+  return invoke("enqueue_batch", { projectId, assetIds, jobType });
+}
+
+export function listQueueJobs(limit = 100): Promise<Job[]> {
+  return invoke("list_queue_jobs", { limit });
+}
+
+export function queueJobCounts(): Promise<JobCounts> {
+  return invoke("queue_job_counts");
+}
+
+export function retryJob(jobId: number): Promise<void> {
+  return invoke("retry_job", { jobId });
+}
+
+/** Fires whenever a queue job's status changes (claimed, done, failed). */
+export function onJobUpdated(handler: (job: Job) => void): Promise<UnlistenFn> {
+  return listen<Job>("job-updated", (event) => handler(event.payload));
+}

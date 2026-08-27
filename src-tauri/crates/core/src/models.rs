@@ -38,8 +38,16 @@ pub struct Asset {
     pub updated_at: String,
 }
 
-/// A row in the `jobs` table: one unit of async work against an asset
-/// (analysis, metadata generation, embedding, upload, ...).
+/// A row in the `jobs` table: one unit of work against an asset (analysis,
+/// metadata generation, embedding, keyword enrichment, ...).
+///
+/// `source` distinguishes two independent lifecycles sharing this table:
+/// `"direct"` rows are a fire-and-forget history log written by a
+/// synchronous single-asset command (already `done`/`failed` by the time
+/// they're visible) and `"queue"` rows are batch jobs (SPHIN-7) that start
+/// `pending` and are claimed and driven through `running` -> `done`/`failed`
+/// by the background worker. The worker only ever claims `"queue"` rows, so
+/// the two lifecycles never race on the same row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
     pub id: i64,
@@ -47,8 +55,18 @@ pub struct Job {
     pub job_type: String,
     pub status: String,
     pub error: Option<String>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default = "default_job_payload")]
+    pub payload_json: String,
+    #[serde(default)]
+    pub attempts: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_job_payload() -> String {
+    "{}".to_string()
 }
 
 /// A row in the `projects` table. A project is a working set of assets that

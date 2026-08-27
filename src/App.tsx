@@ -9,9 +9,12 @@ import {
   type EmbedConfig,
   type GeneratedMetadata,
   type IngestSummary,
+  type Job,
+  type JobCounts,
   type KeywordConfig,
   type LimiterProfile,
   type ProviderKind,
+  type QueueJobType,
   DEFAULT_ANALYSIS_CONFIG,
   DEFAULT_EMBED_CONFIG,
   DEFAULT_KEYWORD_CONFIG,
@@ -19,6 +22,7 @@ import {
   assetCount,
   checkExiftool,
   embedAssetMetadata,
+  enqueueBatch,
   enrichKeywords,
   exportMetadataCsv,
   generateMetadata,
@@ -32,7 +36,11 @@ import {
   ingestFolder,
   listAssets,
   listLimiterProfiles,
+  listQueueJobs,
   onAssetsIngested,
+  onJobUpdated,
+  queueJobCounts,
+  retryJob,
   setAnalysisConfig,
   setEmbedConfig,
   setKeywordConfig,
@@ -136,6 +144,11 @@ export default function App() {
   const [showKeywordConfig, setShowKeywordConfig] = useState(false);
   const [enriching, setEnriching] = useState<Record<number, boolean>>({});
 
+  // --- SPHIN-7 job orchestration state ---
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobCounts, setJobCounts] = useState<JobCounts>({ pending: 0, running: 0, done: 0, failed: 0 });
+  const [showJobs, setShowJobs] = useState(false);
+
   const refresh = useCallback(async () => {
     const [rows, count] = await Promise.all([listAssets(200, 0), assetCount()]);
     setAssets(rows);
@@ -206,6 +219,39 @@ export default function App() {
       })
       .catch(() => setEmbedConfigReady(true));
   }, [runExiftoolCheck]);
+
+  const refreshJobs = useCallback(async () => {
+    const [rows, counts] = await Promise.all([listQueueJobs(200), queueJobCounts()]);
+    setJobs(rows);
+    setJobCounts(counts);
+  }, []);
+
+  useEffect(() => {
+    void refreshJobs();
+  }, [refreshJobs]);
+
+  // A completed queue job may have produced a new analysis/metadata result
+  // for an asset already marked "loaded" by the backfill effects below, so
+  // fetch that asset's latest data directly rather than relying on them.
+  const refreshAssetResult = useCallback(async (assetId: number) => {
+    const [analysis, meta] = await Promise.all([getAnalysis(assetId), getMetadata(assetId)]);
+    if (analysis) setAnalyses((prev) => ({ ...prev, [assetId]: analysis.result }));
+    if (meta) setGenerated((prev) => ({ ...prev, [assetId]: meta.result }));
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onJobUpdated((job) => {
+      void refreshJobs();
+      if (job.status === "done") {
+        void refreshAssetResult(job.asset_id);
+        void refresh();
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [refreshJobs, refreshAssetResult, refresh]);
 
   useEffect(() => {
     getKeywordConfig(PROJECT_ID)
@@ -494,6 +540,54 @@ export default function App() {
     }
   }
 
+  function eligibleForBatch(jobType: QueueJobType): Asset[] {
+    switch (jobType) {
+      case "analyze":
+        return assets.filter(
+          (a) =>
+            hasKey &&
+            a.media_type === "image" &&
+            ANALYZABLE_EXTENSIONS.includes(extensionOf(a.path)) &&
+            !analyses[a.id]
+        );
+      case "generate_metadata":
+        return assets.filter((a) => analyses[a.id] && !generated[a.id]);
+      case "embed":
+        return assets.filter((a) => generated[a.id]);
+      case "enrich_keywords":
+        return hasKeywordProvider ? assets.filter((a) => generated[a.id]) : [];
+    }
+  }
+
+  async function handleEnqueueBatch(jobType: QueueJobType, label: string) {
+    const targets = eligibleForBatch(jobType);
+    if (targets.length === 0) {
+      setStatus(`No assets are eligible to queue for "${label}" right now.`);
+      return;
+    }
+    try {
+      await enqueueBatch(
+        PROJECT_ID,
+        targets.map((a) => a.id),
+        jobType
+      );
+      setStatus(`Queued ${targets.length} asset(s) for "${label}".`);
+      setShowJobs(true);
+      await refreshJobs();
+    } catch (err) {
+      setStatus(`Could not queue batch: ${String(err)}`);
+    }
+  }
+
+  async function handleRetryJob(job: Job) {
+    try {
+      await retryJob(job.id);
+      await refreshJobs();
+    } catch (err) {
+      setStatus(`Could not retry job: ${String(err)}`);
+    }
+  }
+
   async function handleAnalyze(asset: Asset) {
     setAnalyzing((prev) => ({ ...prev, [asset.id]: true }));
     setStatus(`Analyzing ${asset.path.split(/[\\/]/).pop()}…`);
@@ -516,7 +610,7 @@ export default function App() {
         <h1>Sphinx</h1>
         <p className="subtitle">
           Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3) ·
-          Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5)
+          Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5) · Job orchestration (SPHIN-7)
         </p>
       </header>
 
@@ -790,6 +884,74 @@ export default function App() {
                 Save
               </button>
             </div>
+          </div>
+        )}
+      </section>
+
+      <section className="analysis-config">
+        <div className="analysis-config-head">
+          <h2>
+            Jobs{" "}
+            <span className="count">
+              · {jobCounts.pending} pending · {jobCounts.running} running · {jobCounts.done} done ·{" "}
+              {jobCounts.failed} failed
+            </span>
+          </h2>
+          <button onClick={() => setShowJobs((v) => !v)}>{showJobs ? "Hide" : "Show"}</button>
+        </div>
+
+        {showJobs && (
+          <div className="config-form">
+            <div className="dropzone-actions">
+              <button onClick={() => handleEnqueueBatch("analyze", "Analyze")}>Queue: Analyze all new</button>
+              <button onClick={() => handleEnqueueBatch("generate_metadata", "Generate metadata")}>
+                Queue: Generate metadata
+              </button>
+              <button onClick={() => handleEnqueueBatch("embed", "Embed")}>Queue: Embed all</button>
+              <button onClick={() => handleEnqueueBatch("enrich_keywords", "Enrich keywords")}>
+                Queue: Enrich keywords
+              </button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Error</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.map((job) => {
+                  const asset = assets.find((a) => a.id === job.asset_id);
+                  return (
+                    <tr key={job.id}>
+                      <td className="path" title={asset?.path}>
+                        {asset ? asset.path.split(/[\\/]/).pop() : `asset ${job.asset_id}`}
+                      </td>
+                      <td>{job.job_type}</td>
+                      <td>{job.status}</td>
+                      <td>{job.error ?? "—"}</td>
+                      <td>
+                        {job.status === "failed" && (
+                          <button className="link-btn" onClick={() => handleRetryJob(job)}>
+                            Retry
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {jobs.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="empty">
+                      No queued jobs yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

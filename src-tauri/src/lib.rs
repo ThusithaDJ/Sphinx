@@ -4,19 +4,20 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
 use sphinx_core::analysis::{AnalysisConfig, AnalysisResult};
+use sphinx_core::db::JobCounts;
 use sphinx_core::embed::{EmbedConfig, EmbedOutcome, ExportRow};
 use sphinx_core::keywords::{AdobeStockProvider, KeywordConfig, KeywordProvider, ShutterstockProvider};
 use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
-use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, MetadataRecord, Project};
+use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Job, MetadataRecord, Project};
 use sphinx_core::watch::WatchHandle;
 use sphinx_core::{analysis, db, embed, ingest, metadata};
 use tauri::{Emitter, Manager};
 
 /// Shared app state: the SQLite connection and the current folder-watch
 /// handle (if any). A single connection behind a mutex is plenty for the
-/// ingestion workload here (no long-running writes) and keeps SPHIN-1 simple;
-/// a connection pool can replace this later if job orchestration (SPHIN-7)
-/// needs concurrent writers.
+/// ingestion workload here (no long-running writes): the batch job worker
+/// (SPHIN-7) processes one queue job at a time rather than needing
+/// concurrent writers, so this doesn't need to grow into a connection pool.
 struct AppState {
     db: Mutex<Connection>,
     watch: Mutex<Option<WatchHandle>>,
@@ -649,6 +650,132 @@ async fn enrich_keywords(
     })
 }
 
+// --- job orchestration (SPHIN-7) ---------------------------------------------
+
+const QUEUE_JOB_TYPES: [&str; 4] = ["analyze", "generate_metadata", "embed", "enrich_keywords"];
+const QUEUE_POLL_INTERVAL_MS: u64 = 400;
+
+/// Enqueue one batch job per asset for the background worker to pick up.
+/// `job_type` is one of [`QUEUE_JOB_TYPES`]. SPHIN-28.
+#[tauri::command]
+fn enqueue_batch(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    asset_ids: Vec<i64>,
+    job_type: String,
+) -> Result<Vec<Job>, String> {
+    if !QUEUE_JOB_TYPES.contains(&job_type.as_str()) {
+        return Err(format!("unknown job type: {job_type}"));
+    }
+    let payload = serde_json::json!({ "project_id": project_id }).to_string();
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::enqueue_jobs(&conn, &asset_ids, &job_type, &payload).map_err(|e| e.to_string())
+}
+
+/// Batch (queue) jobs, most recent first, for the progress dashboard. SPHIN-29.
+#[tauri::command]
+fn list_queue_jobs(state: tauri::State<AppState>, limit: i64) -> Result<Vec<Job>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::list_queue_jobs(&conn, limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn queue_job_counts(state: tauri::State<AppState>) -> Result<JobCounts, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::queue_job_counts(&conn).map_err(|e| e.to_string())
+}
+
+/// Re-enqueue a failed job for another attempt. SPHIN-30.
+#[tauri::command]
+fn retry_job(state: tauri::State<AppState>, job_id: i64) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::retry_job(&conn, job_id).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct QueueJobPayload {
+    #[serde(default = "default_project_id")]
+    project_id: i64,
+}
+
+fn default_project_id() -> i64 {
+    1
+}
+
+/// Run one claimed job by delegating to the same command handlers a direct
+/// single-asset click would use -- the worker is just another caller of
+/// them, so there is exactly one implementation of each operation to keep
+/// correct.
+async fn execute_queue_job(app: &tauri::AppHandle, job: &Job) -> Result<(), String> {
+    let payload: QueueJobPayload =
+        serde_json::from_str(&job.payload_json).unwrap_or(QueueJobPayload { project_id: 1 });
+    let state: tauri::State<'_, AppState> = app.state();
+
+    match job.job_type.as_str() {
+        "analyze" => analyze_asset(state, payload.project_id, job.asset_id)
+            .await
+            .map(|_| ()),
+        "generate_metadata" => generate_metadata(state, payload.project_id, job.asset_id).map(|_| ()),
+        "embed" => embed_asset_metadata(state, payload.project_id, job.asset_id)
+            .await
+            .map(|_| ()),
+        "enrich_keywords" => enrich_keywords(state, payload.project_id, job.asset_id)
+            .await
+            .map(|_| ()),
+        other => Err(format!("unknown job type: {other}")),
+    }
+}
+
+/// The single background worker: claim the oldest pending queue job, run it,
+/// record the outcome, and push a `job-updated` event so the dashboard can
+/// update live -- Tauri's IPC event bridge stands in for the WebSocket
+/// called out in SPHIN-29, since frontend and backend already share a
+/// process and don't need an actual socket between them. One job at a time
+/// keeps this simple and naturally respects external rate limits (SPHIN-24)
+/// without extra coordination.
+fn spawn_job_worker(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let claimed = {
+                let state: tauri::State<'_, AppState> = app.state();
+                let conn = match state.db.lock() {
+                    Ok(c) => c,
+                    Err(_) => break,
+                };
+                db::claim_next_pending_job(&conn).ok().flatten()
+            };
+
+            let Some(job) = claimed else {
+                tokio::time::sleep(std::time::Duration::from_millis(QUEUE_POLL_INTERVAL_MS)).await;
+                continue;
+            };
+
+            let _ = app.emit("job-updated", &job);
+
+            let result = execute_queue_job(&app, &job).await;
+
+            let (status, error): (&str, Option<String>) = match &result {
+                Ok(()) => ("done", None),
+                Err(e) => ("failed", Some(e.clone())),
+            };
+            let updated = Job {
+                status: status.to_string(),
+                error: error.clone(),
+                ..job
+            };
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let conn = match state.db.lock() {
+                    Ok(c) => c,
+                    Err(_) => break,
+                };
+                let _ = db::set_job_status(&conn, updated.id, status, error.as_deref());
+            }
+            let _ = app.emit("job-updated", &updated);
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -664,6 +791,7 @@ pub fn run() {
                 db: Mutex::new(conn),
                 watch: Mutex::new(None),
             });
+            spawn_job_worker(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -692,6 +820,10 @@ pub fn run() {
             get_keyword_config,
             set_keyword_config,
             enrich_keywords,
+            enqueue_batch,
+            list_queue_jobs,
+            queue_job_counts,
+            retry_job,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

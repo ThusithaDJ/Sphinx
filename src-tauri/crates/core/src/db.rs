@@ -10,7 +10,7 @@ use crate::keywords::KeywordConfig;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
 use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project};
 
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// Key under which the per-project analysis config JSON is stored in
 /// `project_settings`.
@@ -77,6 +77,9 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if current < 4 {
         migrate_v4(conn)?;
+    }
+    if current < 5 {
+        migrate_v5(conn)?;
     }
 
     conn.execute(
@@ -213,6 +216,20 @@ fn migrate_v4(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v5 (SPHIN-7): job orchestration. `source` separates the pre-existing
+/// direct-command audit log from the new batch queue (see [`crate::models::Job`]);
+/// `payload_json` carries per-job context (e.g. which project); `attempts`
+/// backs retry (SPHIN-30).
+fn migrate_v5(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "jobs", "source", "TEXT NOT NULL DEFAULT 'direct'")?;
+    add_column_if_missing(conn, "jobs", "payload_json", "TEXT NOT NULL DEFAULT '{}'")?;
+    add_column_if_missing(conn, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0")?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_source_status ON jobs(source, status);",
+    )?;
+    Ok(())
+}
+
 /// SQLite has no `ADD COLUMN IF NOT EXISTS`; emulate it via `pragma_table_info`.
 fn add_column_if_missing(
     conn: &Connection,
@@ -322,11 +339,15 @@ pub fn count_assets(conn: &Connection) -> Result<i64> {
 
 // --- jobs (SPHIN-1) --------------------------------------------------------
 
+/// Log a job for a single direct (synchronous, single-asset command)
+/// action. Always `source = 'direct'`, so the batch worker (SPHIN-7) never
+/// touches it. Starts `pending`; callers immediately follow up with
+/// [`set_job_status`].
 pub fn insert_job(conn: &Connection, asset_id: i64, job_type: &str) -> Result<Job> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO jobs (asset_id, job_type, status, created_at, updated_at)
-         VALUES (?1, ?2, 'pending', ?3, ?3)",
+        "INSERT INTO jobs (asset_id, job_type, status, source, payload_json, attempts, created_at, updated_at)
+         VALUES (?1, ?2, 'pending', 'direct', '{}', 0, ?3, ?3)",
         params![asset_id, job_type, now],
     )?;
     let id = conn.last_insert_rowid();
@@ -336,6 +357,9 @@ pub fn insert_job(conn: &Connection, asset_id: i64, job_type: &str) -> Result<Jo
         job_type: job_type.to_string(),
         status: "pending".to_string(),
         error: None,
+        source: "direct".to_string(),
+        payload_json: "{}".to_string(),
+        attempts: 0,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -353,6 +377,119 @@ pub fn set_job_status(
         params![job_id, status, error, Utc::now().to_rfc3339()],
     )?;
     Ok(())
+}
+
+// --- job queue (SPHIN-7) -----------------------------------------------------
+
+/// Enqueue one batch job per asset in `asset_ids`, all `source = 'queue'`
+/// and `status = 'pending'`, ready for the background worker to claim.
+pub fn enqueue_jobs(
+    conn: &Connection,
+    asset_ids: &[i64],
+    job_type: &str,
+    payload_json: &str,
+) -> Result<Vec<Job>> {
+    let now = Utc::now().to_rfc3339();
+    let mut jobs = Vec::with_capacity(asset_ids.len());
+    for &asset_id in asset_ids {
+        conn.execute(
+            "INSERT INTO jobs (asset_id, job_type, status, source, payload_json, attempts, created_at, updated_at)
+             VALUES (?1, ?2, 'pending', 'queue', ?3, 0, ?4, ?4)",
+            params![asset_id, job_type, payload_json, now],
+        )?;
+        jobs.push(Job {
+            id: conn.last_insert_rowid(),
+            asset_id,
+            job_type: job_type.to_string(),
+            status: "pending".to_string(),
+            error: None,
+            source: "queue".to_string(),
+            payload_json: payload_json.to_string(),
+            attempts: 0,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    }
+    Ok(jobs)
+}
+
+/// Atomically claim the oldest pending queue job, transitioning it to
+/// `running`. Safe under concurrent callers only in that they all serialize
+/// through the same [`Connection`] (guarded by a `Mutex` at the app layer);
+/// this function does not itself provide cross-connection locking.
+pub fn claim_next_pending_job(conn: &Connection) -> Result<Option<Job>> {
+    let job = conn
+        .query_row(
+            "SELECT id, asset_id, job_type, status, error, source, payload_json, attempts, created_at, updated_at
+             FROM jobs WHERE status = 'pending' AND source = 'queue' ORDER BY id ASC LIMIT 1",
+            [],
+            row_to_job,
+        )
+        .optional()?;
+    let Some(job) = job else {
+        return Ok(None);
+    };
+    conn.execute(
+        "UPDATE jobs SET status = 'running', updated_at = ?2 WHERE id = ?1",
+        params![job.id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(Some(Job {
+        status: "running".to_string(),
+        ..job
+    }))
+}
+
+/// Reset a failed (or stuck) queue job back to `pending` for another attempt,
+/// clearing its error and bumping `attempts`. SPHIN-30.
+pub fn retry_job(conn: &Connection, job_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE jobs SET status = 'pending', error = NULL, attempts = attempts + 1, updated_at = ?2
+         WHERE id = ?1 AND source = 'queue'",
+        params![job_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Queue jobs (batch work only, not the direct-command audit log), most
+/// recent first, for the progress dashboard. SPHIN-29.
+pub fn list_queue_jobs(conn: &Connection, limit: i64) -> Result<Vec<Job>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, asset_id, job_type, status, error, source, payload_json, attempts, created_at, updated_at
+         FROM jobs WHERE source = 'queue' ORDER BY id DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], row_to_job)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+/// How many queue jobs are in each status, for a summary badge.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize)]
+pub struct JobCounts {
+    pub pending: i64,
+    pub running: i64,
+    pub done: i64,
+    pub failed: i64,
+}
+
+pub fn queue_job_counts(conn: &Connection) -> Result<JobCounts> {
+    let mut counts = JobCounts::default();
+    let mut stmt =
+        conn.prepare("SELECT status, COUNT(*) FROM jobs WHERE source = 'queue' GROUP BY status")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    for row in rows {
+        let (status, count) = row?;
+        match status.as_str() {
+            "pending" => counts.pending = count,
+            "running" => counts.running = count,
+            "done" => counts.done = count,
+            "failed" => counts.failed = count,
+            _ => {}
+        }
+    }
+    Ok(counts)
 }
 
 // --- projects & settings (SPHIN-2 / SPHIN-17) ------------------------------
@@ -659,6 +796,21 @@ fn row_to_asset(row: &rusqlite::Row) -> rusqlite::Result<Asset> {
     })
 }
 
+fn row_to_job(row: &rusqlite::Row) -> rusqlite::Result<Job> {
+    Ok(Job {
+        id: row.get(0)?,
+        asset_id: row.get(1)?,
+        job_type: row.get(2)?,
+        status: row.get(3)?,
+        error: row.get(4)?,
+        source: row.get(5)?,
+        payload_json: row.get(6)?,
+        attempts: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+    })
+}
+
 fn row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {
     Ok(Project {
         id: row.get(0)?,
@@ -837,6 +989,78 @@ mod tests {
 
         let back = get_embed_config(&conn, 1).unwrap().unwrap();
         assert_eq!(back.exiftool_path, "C:\\Tools\\exiftool.exe");
+    }
+
+    #[test]
+    fn enqueued_jobs_are_pending_and_source_queue() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let jobs = enqueue_jobs(&conn, &[a.id], "analyze", r#"{"project_id":1}"#).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].status, "pending");
+        assert_eq!(jobs[0].source, "queue");
+        assert_eq!(jobs[0].payload_json, r#"{"project_id":1}"#);
+    }
+
+    #[test]
+    fn claim_next_pending_job_only_claims_queue_jobs_oldest_first() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        // A direct-command job sitting pending must never be claimed.
+        insert_job(&conn, a.id, "analysis").unwrap();
+        let queued = enqueue_jobs(&conn, &[a.id, a.id], "analyze", "{}").unwrap();
+
+        let claimed = claim_next_pending_job(&conn).unwrap().unwrap();
+        assert_eq!(claimed.id, queued[0].id);
+        assert_eq!(claimed.status, "running");
+
+        let claimed2 = claim_next_pending_job(&conn).unwrap().unwrap();
+        assert_eq!(claimed2.id, queued[1].id);
+
+        assert!(claim_next_pending_job(&conn).unwrap().is_none());
+    }
+
+    #[test]
+    fn retry_job_resets_a_failed_queue_job_to_pending() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let job = &enqueue_jobs(&conn, &[a.id], "analyze", "{}").unwrap()[0];
+        claim_next_pending_job(&conn).unwrap();
+        set_job_status(&conn, job.id, "failed", Some("boom")).unwrap();
+
+        retry_job(&conn, job.id).unwrap();
+
+        let refreshed = claim_next_pending_job(&conn).unwrap().unwrap();
+        assert_eq!(refreshed.id, job.id);
+        assert_eq!(refreshed.attempts, 1);
+        assert!(refreshed.error.is_none());
+    }
+
+    #[test]
+    fn queue_job_counts_tally_by_status() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let jobs = enqueue_jobs(&conn, &[a.id, a.id, a.id], "analyze", "{}").unwrap();
+        claim_next_pending_job(&conn).unwrap(); // jobs[0] -> running
+        set_job_status(&conn, jobs[1].id, "done", None).unwrap();
+
+        let counts = queue_job_counts(&conn).unwrap();
+        assert_eq!(counts.pending, 1);
+        assert_eq!(counts.running, 1);
+        assert_eq!(counts.done, 1);
+        assert_eq!(counts.failed, 0);
+    }
+
+    #[test]
+    fn list_queue_jobs_excludes_direct_jobs() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        insert_job(&conn, a.id, "analysis").unwrap();
+        enqueue_jobs(&conn, &[a.id], "analyze", "{}").unwrap();
+
+        let jobs = list_queue_jobs(&conn, 10).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].source, "queue");
     }
 
     #[test]
