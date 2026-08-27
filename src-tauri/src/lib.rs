@@ -4,9 +4,10 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
 use sphinx_core::analysis::{AnalysisConfig, AnalysisResult};
-use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Project};
+use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
+use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, MetadataRecord, Project};
 use sphinx_core::watch::WatchHandle;
-use sphinx_core::{analysis, db, ingest};
+use sphinx_core::{analysis, db, ingest, metadata};
 use tauri::{Emitter, Manager};
 
 /// Shared app state: the SQLite connection and the current folder-watch
@@ -258,6 +259,96 @@ async fn analyze_asset(
     }
 }
 
+// --- metadata generation & limiter profiles (SPHIN-3) ------------------------
+
+/// The built-in limiter profile presets, for a site picker in the UI.
+#[tauri::command]
+fn list_limiter_profiles() -> Vec<LimiterProfile> {
+    LimiterProfile::built_ins()
+}
+
+/// The saved limiter profile for a project, or `null` if never set (the UI
+/// should fall back to [`LimiterProfile::default`]).
+#[tauri::command]
+fn get_limiter_profile(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Option<LimiterProfile>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_limiter_profile(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_limiter_profile(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    profile: LimiterProfile,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_limiter_profile(&conn, project_id, &profile).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Serialize)]
+struct MetadataResponse {
+    record_id: i64,
+    result: GeneratedMetadata,
+}
+
+fn metadata_response(record: MetadataRecord) -> Result<MetadataResponse, String> {
+    let keywords: Vec<String> =
+        serde_json::from_str(&record.keywords_json).map_err(|e| e.to_string())?;
+    Ok(MetadataResponse {
+        record_id: record.id,
+        result: GeneratedMetadata {
+            title: record.title,
+            description: record.description,
+            keywords,
+            profile: record.profile,
+            meets_minimum_keywords: record.meets_minimum_keywords,
+        },
+    })
+}
+
+/// The latest generated metadata for an asset, or `null` if none has been
+/// generated yet.
+#[tauri::command]
+fn get_metadata(
+    state: tauri::State<AppState>,
+    asset_id: i64,
+) -> Result<Option<MetadataResponse>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    match db::latest_metadata_for_asset(&conn, asset_id).map_err(|e| e.to_string())? {
+        Some(record) => metadata_response(record).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Generate title/description/keywords from the asset's latest analysis,
+/// fit to the project's limiter profile (or [`LimiterProfile::default`] if
+/// the project hasn't picked one). Pure and fast -- no network call. SPHIN-3
+/// (18/19).
+#[tauri::command]
+fn generate_metadata(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    asset_id: i64,
+) -> Result<MetadataResponse, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let analysis_record = db::latest_analysis_for_asset(&conn, asset_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "asset has not been analyzed yet".to_string())?;
+    let analysis: AnalysisResult =
+        serde_json::from_str(&analysis_record.result_json).map_err(|e| e.to_string())?;
+    let profile = db::get_limiter_profile(&conn, project_id)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+
+    let generated = metadata::generate(&analysis, &profile);
+    let record = db::insert_metadata(&conn, asset_id, &generated).map_err(|e| e.to_string())?;
+    db::set_asset_status(&conn, asset_id, "metadata_generated").map_err(|e| e.to_string())?;
+    metadata_response(record)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -288,6 +379,11 @@ pub fn run() {
             set_analysis_config,
             get_analysis,
             analyze_asset,
+            list_limiter_profiles,
+            get_limiter_profile,
+            set_limiter_profile,
+            get_metadata,
+            generate_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

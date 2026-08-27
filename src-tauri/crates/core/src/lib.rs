@@ -8,12 +8,15 @@
 //! Modules by epic:
 //! - [`hash`], [`ingest`], [`watch`], [`db`] — SPHIN-1, ingestion & data layer.
 //! - [`analysis`] — SPHIN-2, media analysis via cloud vision models.
+//! - [`metadata`] — SPHIN-3, title/description/keyword generation from
+//!   analysis output plus per-site limiter profiles.
 
 pub mod analysis;
 pub mod db;
 pub mod error;
 pub mod hash;
 pub mod ingest;
+pub mod metadata;
 pub mod models;
 pub mod watch;
 

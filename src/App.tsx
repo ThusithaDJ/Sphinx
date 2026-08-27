@@ -6,18 +6,25 @@ import {
   type AnalysisConfig,
   type AnalysisResult,
   type Asset,
+  type GeneratedMetadata,
   type IngestSummary,
+  type LimiterProfile,
   type ProviderKind,
   DEFAULT_ANALYSIS_CONFIG,
   analyzeAsset,
   assetCount,
+  generateMetadata,
   getAnalysis,
   getAnalysisConfig,
+  getLimiterProfile,
+  getMetadata,
   ingestFiles,
   ingestFolder,
   listAssets,
+  listLimiterProfiles,
   onAssetsIngested,
   setAnalysisConfig,
+  setLimiterProfile,
   startWatch,
   stopWatch,
 } from "./lib/api";
@@ -33,6 +40,17 @@ const PROVIDER_LABELS: Record<ProviderKind, string> = {
   openai: "OpenAI (GPT-4o)",
   gemini: "Google Gemini",
   anthropic: "Anthropic Claude",
+};
+
+// Mirrors LimiterProfile::shutterstock() / ::default() on the Rust side, used
+// only until the built-in list and any saved project profile have loaded.
+const FALLBACK_LIMITER_PROFILE: LimiterProfile = {
+  name: "Shutterstock",
+  max_title_chars: 200,
+  max_description_chars: 200,
+  min_keywords: 7,
+  max_keywords: 50,
+  max_keyword_chars: 50,
 };
 
 // Vision models accept a narrower set of formats than we ingest.
@@ -82,6 +100,15 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState<Record<number, boolean>>({});
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
+  // --- SPHIN-3 metadata generation state ---
+  const [profiles, setProfiles] = useState<LimiterProfile[]>([FALLBACK_LIMITER_PROFILE]);
+  const [profile, setProfile] = useState<LimiterProfile>(FALLBACK_LIMITER_PROFILE);
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileDirty, setProfileDirty] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [generated, setGenerated] = useState<Record<number, GeneratedMetadata>>({});
+  const [generating, setGenerating] = useState<Record<number, boolean>>({});
+
   const refresh = useCallback(async () => {
     const [rows, count] = await Promise.all([listAssets(200, 0), assetCount()]);
     setAssets(rows);
@@ -118,6 +145,37 @@ export default function App() {
       })
       .catch(() => setConfigReady(true));
   }, []);
+
+  useEffect(() => {
+    listLimiterProfiles()
+      .then((list) => {
+        if (list.length) setProfiles(list);
+      })
+      .catch(() => {});
+    getLimiterProfile(PROJECT_ID)
+      .then((saved) => {
+        if (saved) setProfile(saved);
+        setProfileReady(true);
+      })
+      .catch(() => setProfileReady(true));
+  }, []);
+
+  // Backfill stored metadata for any assets we haven't loaded one for yet.
+  const loadedMetadataIds = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const missing = assets.filter((a) => !loadedMetadataIds.current.has(a.id));
+    if (missing.length === 0) return;
+    for (const a of missing) loadedMetadataIds.current.add(a.id);
+    void Promise.all(
+      missing.map(async (a) => [a.id, (await getMetadata(a.id))?.result ?? null] as const)
+    ).then((loaded) => {
+      setGenerated((prev) => {
+        const next = { ...prev };
+        for (const [id, result] of loaded) if (result) next[id] = result;
+        return next;
+      });
+    });
+  }, [assets]);
 
   // Tauri delivers native OS drag-drop with real filesystem paths (unlike the
   // browser's File API, which never exposes a usable path) -- this is what
@@ -228,6 +286,44 @@ export default function App() {
 
   const hasKey = config.api_key.trim().length > 0;
 
+  function patchProfile(patch: Partial<LimiterProfile>) {
+    setProfile((prev) => ({ ...prev, ...patch }));
+    setProfileDirty(true);
+  }
+
+  function handlePickProfilePreset(name: string) {
+    const preset = profiles.find((p) => p.name === name);
+    if (preset) {
+      setProfile(preset);
+      setProfileDirty(true);
+    }
+  }
+
+  async function handleSaveProfile() {
+    try {
+      await setLimiterProfile(PROJECT_ID, profile);
+      setProfileDirty(false);
+      setStatus(`Saved "${profile.name}" limiter profile.`);
+    } catch (err) {
+      setStatus(`Could not save limiter profile: ${String(err)}`);
+    }
+  }
+
+  async function handleGenerateMetadata(asset: Asset) {
+    setGenerating((prev) => ({ ...prev, [asset.id]: true }));
+    try {
+      const { result } = await generateMetadata(PROJECT_ID, asset.id);
+      setGenerated((prev) => ({ ...prev, [asset.id]: result }));
+      setExpanded((prev) => ({ ...prev, [asset.id]: true }));
+      setStatus(`Generated metadata for "${profile.name}".`);
+      await refresh();
+    } catch (err) {
+      setStatus(`Metadata generation failed: ${String(err)}`);
+    } finally {
+      setGenerating((prev) => ({ ...prev, [asset.id]: false }));
+    }
+  }
+
   async function handleAnalyze(asset: Asset) {
     setAnalyzing((prev) => ({ ...prev, [asset.id]: true }));
     setStatus(`Analyzing ${asset.path.split(/[\\/]/).pop()}…`);
@@ -248,7 +344,9 @@ export default function App() {
     <main className="app">
       <header className="app-header">
         <h1>Sphinx</h1>
-        <p className="subtitle">Ingestion (SPHIN-1) · Media analysis (SPHIN-2)</p>
+        <p className="subtitle">
+          Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3)
+        </p>
       </header>
 
       <div ref={dropRef} className={`dropzone${isDragging ? " dropzone--active" : ""}`}>
@@ -350,6 +448,78 @@ export default function App() {
         )}
       </section>
 
+      <section className="analysis-config">
+        <div className="analysis-config-head">
+          <h2>
+            Metadata limits <span className="count">· {profileReady ? profile.name : "loading…"}</span>
+          </h2>
+          <button onClick={() => setShowProfile((v) => !v)}>
+            {showProfile ? "Hide" : "Configure"}
+          </button>
+        </div>
+
+        {showProfile && (
+          <div className="config-form">
+            <label>
+              Stock site preset
+              <select value={profile.name} onChange={(e) => handlePickProfilePreset(e.target.value)}>
+                {profiles.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                  </option>
+                ))}
+                {!profiles.some((p) => p.name === profile.name) && (
+                  <option value={profile.name}>{profile.name} (custom)</option>
+                )}
+              </select>
+            </label>
+            <label>
+              Max title length
+              <input
+                type="number"
+                min={1}
+                value={profile.max_title_chars}
+                onChange={(e) => patchProfile({ max_title_chars: Number(e.target.value) || 1 })}
+              />
+            </label>
+            <label>
+              Max description length
+              <input
+                type="number"
+                min={1}
+                value={profile.max_description_chars}
+                onChange={(e) =>
+                  patchProfile({ max_description_chars: Number(e.target.value) || 1 })
+                }
+              />
+            </label>
+            <label>
+              Min keywords
+              <input
+                type="number"
+                min={0}
+                value={profile.min_keywords}
+                onChange={(e) => patchProfile({ min_keywords: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label>
+              Max keywords
+              <input
+                type="number"
+                min={1}
+                value={profile.max_keywords}
+                onChange={(e) => patchProfile({ max_keywords: Number(e.target.value) || 1 })}
+              />
+            </label>
+            <div className="config-actions">
+              <button onClick={handleSaveProfile} disabled={!profileDirty} className="btn-active">
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <section className="assets">
         <h2>
           Assets <span className="count">({total})</span>
@@ -363,11 +533,13 @@ export default function App() {
               <th>Status</th>
               <th>Ingested</th>
               <th>Analysis</th>
+              <th>Metadata</th>
             </tr>
           </thead>
           <tbody>
             {assets.map((asset) => {
               const result = analyses[asset.id];
+              const meta = generated[asset.id];
               const isImage = asset.media_type === "image";
               const analyzable =
                 isImage && ANALYZABLE_EXTENSIONS.includes(extensionOf(asset.path));
@@ -413,11 +585,38 @@ export default function App() {
                         </>
                       )}
                     </td>
+                    <td className="analysis-cell">
+                      {generating[asset.id] ? (
+                        <span className="muted">generating…</span>
+                      ) : (
+                        <>
+                          <button
+                            className="link-btn"
+                            disabled={!result}
+                            title={!result ? "Analyze the asset first" : ""}
+                            onClick={() => handleGenerateMetadata(asset)}
+                          >
+                            {meta ? "Regenerate" : "Generate"}
+                          </button>
+                          {meta && (
+                            <button
+                              className="link-btn"
+                              onClick={() =>
+                                setExpanded((p) => ({ ...p, [asset.id]: !p[asset.id] }))
+                              }
+                            >
+                              {expanded[asset.id] ? "Hide" : "View"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </td>
                   </tr>
-                  {result && expanded[asset.id] && (
+                  {(result || meta) && expanded[asset.id] && (
                     <tr className="analysis-detail-row">
-                      <td colSpan={6}>
-                        <AnalysisDetail result={result} />
+                      <td colSpan={7}>
+                        {result && <AnalysisDetail result={result} />}
+                        {meta && <MetadataDetail meta={meta} />}
                       </td>
                     </tr>
                   )}
@@ -426,7 +625,7 @@ export default function App() {
             })}
             {assets.length === 0 && (
               <tr>
-                <td colSpan={6} className="empty">
+                <td colSpan={7} className="empty">
                   No assets ingested yet.
                 </td>
               </tr>
@@ -485,6 +684,38 @@ function AnalysisDetail({ result }: { result: AnalysisResult }) {
       </div>
       <p className="provenance">
         {result.provider} / {result.model} · {result.keywords.length} keywords
+      </p>
+    </div>
+  );
+}
+
+function MetadataDetail({ meta }: { meta: GeneratedMetadata }) {
+  return (
+    <div className="analysis-detail metadata-detail">
+      <dl>
+        <div>
+          <dt>Title</dt>
+          <dd>{meta.title}</dd>
+        </div>
+        <div>
+          <dt>Description</dt>
+          <dd>{meta.description}</dd>
+        </div>
+      </dl>
+      <div className="keyword-chips">
+        {meta.keywords.map((kw) => (
+          <span key={kw} className="chip">
+            {kw}
+          </span>
+        ))}
+      </div>
+      <p className="provenance">
+        {meta.profile} profile · {meta.keywords.length} keywords
+        {!meta.meets_minimum_keywords && (
+          <span className="badge badge-warn" style={{ marginLeft: "0.5rem" }}>
+            below site minimum
+          </span>
+        )}
       </p>
     </div>
   );

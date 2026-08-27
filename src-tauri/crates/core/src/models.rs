@@ -74,6 +74,20 @@ pub struct AnalysisRecord {
     pub created_at: String,
 }
 
+/// A row in the `metadata` table: one generated title/description/keyword
+/// set for an asset (SPHIN-3). `keywords_json` is a serialized `Vec<String>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetadataRecord {
+    pub id: i64,
+    pub asset_id: i64,
+    pub title: String,
+    pub description: String,
+    pub keywords_json: String,
+    pub profile: String,
+    pub meets_minimum_keywords: bool,
+    pub created_at: String,
+}
+
 /// Outcome of attempting to ingest a single path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]

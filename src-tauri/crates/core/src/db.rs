@@ -5,13 +5,18 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::analysis::AnalysisConfig;
 use crate::error::Result;
-use crate::models::{AnalysisRecord, Asset, Job, Project};
+use crate::metadata::{GeneratedMetadata, LimiterProfile};
+use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project};
 
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 /// Key under which the per-project analysis config JSON is stored in
 /// `project_settings`.
 const ANALYSIS_CONFIG_KEY: &str = "analysis_config";
+
+/// Key under which the per-project limiter profile JSON is stored in
+/// `project_settings` (SPHIN-19).
+const LIMITER_PROFILE_KEY: &str = "limiter_profile";
 
 /// Open (creating if needed) the SQLite database at `path` and run migrations.
 pub fn open(path: impl AsRef<Path>) -> Result<Connection> {
@@ -56,6 +61,9 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if current < 2 {
         migrate_v2(conn)?;
+    }
+    if current < 3 {
+        migrate_v3(conn)?;
     }
 
     conn.execute(
@@ -150,6 +158,27 @@ fn migrate_v2(conn: &Connection) -> Result<()> {
         params![now],
     )?;
 
+    Ok(())
+}
+
+/// v3 (SPHIN-3): generated title/description/keywords per asset.
+fn migrate_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS metadata (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id               INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+            title                  TEXT NOT NULL,
+            description            TEXT NOT NULL,
+            keywords_json          TEXT NOT NULL,
+            profile                TEXT NOT NULL,
+            meets_minimum_keywords INTEGER NOT NULL,
+            created_at             TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_metadata_asset_id ON metadata(asset_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -423,6 +452,77 @@ pub fn latest_analysis_for_asset(
     .map_err(Into::into)
 }
 
+/// The per-project limiter profile (SPHIN-19), or `None` if the project has
+/// never had one saved (callers should fall back to [`LimiterProfile::default`]).
+pub fn get_limiter_profile(
+    conn: &Connection,
+    project_id: i64,
+) -> Result<Option<LimiterProfile>> {
+    match get_project_setting(conn, project_id, LIMITER_PROFILE_KEY)? {
+        Some(json) => Ok(Some(serde_json::from_str(&json)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn set_limiter_profile(
+    conn: &Connection,
+    project_id: i64,
+    profile: &LimiterProfile,
+) -> Result<()> {
+    let json = serde_json::to_string(profile)?;
+    set_project_setting(conn, project_id, LIMITER_PROFILE_KEY, &json)
+}
+
+// --- metadata (SPHIN-3) ------------------------------------------------------
+
+pub fn insert_metadata(
+    conn: &Connection,
+    asset_id: i64,
+    meta: &GeneratedMetadata,
+) -> Result<MetadataRecord> {
+    let now = Utc::now().to_rfc3339();
+    let keywords_json = serde_json::to_string(&meta.keywords)?;
+    conn.execute(
+        "INSERT INTO metadata
+            (asset_id, title, description, keywords_json, profile, meets_minimum_keywords, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            asset_id,
+            meta.title,
+            meta.description,
+            keywords_json,
+            meta.profile,
+            meta.meets_minimum_keywords,
+            now
+        ],
+    )?;
+    Ok(MetadataRecord {
+        id: conn.last_insert_rowid(),
+        asset_id,
+        title: meta.title.clone(),
+        description: meta.description.clone(),
+        keywords_json,
+        profile: meta.profile.clone(),
+        meets_minimum_keywords: meta.meets_minimum_keywords,
+        created_at: now,
+    })
+}
+
+/// The most recent generated metadata for an asset, if any.
+pub fn latest_metadata_for_asset(
+    conn: &Connection,
+    asset_id: i64,
+) -> Result<Option<MetadataRecord>> {
+    conn.query_row(
+        "SELECT id, asset_id, title, description, keywords_json, profile, meets_minimum_keywords, created_at
+         FROM metadata WHERE asset_id = ?1 ORDER BY id DESC LIMIT 1",
+        params![asset_id],
+        row_to_metadata,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 // --- row mappers ------------------------------------------------------------
 
 fn row_to_asset(row: &rusqlite::Row) -> rusqlite::Result<Asset> {
@@ -458,10 +558,24 @@ fn row_to_analysis(row: &rusqlite::Row) -> rusqlite::Result<AnalysisRecord> {
     })
 }
 
+fn row_to_metadata(row: &rusqlite::Row) -> rusqlite::Result<MetadataRecord> {
+    Ok(MetadataRecord {
+        id: row.get(0)?,
+        asset_id: row.get(1)?,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        keywords_json: row.get(4)?,
+        profile: row.get(5)?,
+        meets_minimum_keywords: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::analysis::ProviderKind;
+    use crate::metadata::LimiterProfile;
 
     #[test]
     fn migrate_is_idempotent_and_creates_tables() {
@@ -573,5 +687,51 @@ mod tests {
 
         let latest = latest_analysis_for_asset(&conn, a.id).unwrap().unwrap();
         assert_eq!(latest.result_json, r#"{"v":2}"#);
+    }
+
+    #[test]
+    fn limiter_profile_roundtrips_per_project() {
+        let conn = open_in_memory().unwrap();
+        assert!(get_limiter_profile(&conn, 1).unwrap().is_none());
+
+        let profile = LimiterProfile::adobe_stock();
+        set_limiter_profile(&conn, 1, &profile).unwrap();
+
+        let back = get_limiter_profile(&conn, 1).unwrap().unwrap();
+        assert_eq!(back, profile);
+
+        let p2 = create_project(&conn, "Nature").unwrap();
+        assert!(get_limiter_profile(&conn, p2.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn metadata_records_are_stored_newest_first() {
+        use crate::metadata::GeneratedMetadata;
+
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+
+        let first = GeneratedMetadata {
+            title: "First".into(),
+            description: "First desc".into(),
+            keywords: vec!["a".into()],
+            profile: "Shutterstock".into(),
+            meets_minimum_keywords: false,
+        };
+        let second = GeneratedMetadata {
+            title: "Second".into(),
+            description: "Second desc".into(),
+            keywords: vec!["a".into(), "b".into()],
+            profile: "Shutterstock".into(),
+            meets_minimum_keywords: true,
+        };
+        insert_metadata(&conn, a.id, &first).unwrap();
+        insert_metadata(&conn, a.id, &second).unwrap();
+
+        let latest = latest_metadata_for_asset(&conn, a.id).unwrap().unwrap();
+        assert_eq!(latest.title, "Second");
+        let keywords: Vec<String> = serde_json::from_str(&latest.keywords_json).unwrap();
+        assert_eq!(keywords, vec!["a", "b"]);
+        assert!(latest.meets_minimum_keywords);
     }
 }

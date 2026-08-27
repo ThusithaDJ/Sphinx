@@ -141,3 +141,54 @@ export function analyzeAsset(
 ): Promise<AnalysisResponse> {
   return invoke("analyze_asset", { projectId, assetId });
 }
+
+// --- SPHIN-3: metadata generation & limiter profiles -------------------------
+
+/** Length/count limits enforced when generating metadata for a stock site. */
+export interface LimiterProfile {
+  name: string;
+  max_title_chars: number;
+  max_description_chars: number;
+  min_keywords: number;
+  max_keywords: number;
+  max_keyword_chars: number;
+}
+
+export interface GeneratedMetadata {
+  title: string;
+  description: string;
+  keywords: string[];
+  profile: string;
+  meets_minimum_keywords: boolean;
+}
+
+export interface MetadataResponse {
+  record_id: number;
+  result: GeneratedMetadata;
+}
+
+export function listLimiterProfiles(): Promise<LimiterProfile[]> {
+  return invoke("list_limiter_profiles");
+}
+
+export function getLimiterProfile(projectId: number): Promise<LimiterProfile | null> {
+  return invoke("get_limiter_profile", { projectId });
+}
+
+export function setLimiterProfile(
+  projectId: number,
+  profile: LimiterProfile
+): Promise<void> {
+  return invoke("set_limiter_profile", { projectId, profile });
+}
+
+export function getMetadata(assetId: number): Promise<MetadataResponse | null> {
+  return invoke("get_metadata", { assetId });
+}
+
+export function generateMetadata(
+  projectId: number,
+  assetId: number
+): Promise<MetadataResponse> {
+  return invoke("generate_metadata", { projectId, assetId });
+}
