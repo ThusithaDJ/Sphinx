@@ -279,7 +279,7 @@ export function enrichKeywords(
 
 // --- SPHIN-7: job orchestration ---------------------------------------------
 
-export type QueueJobType = "analyze" | "generate_metadata" | "embed" | "enrich_keywords";
+export type QueueJobType = "analyze" | "generate_metadata" | "embed" | "enrich_keywords" | "upload";
 
 export interface Job {
   id: number;
@@ -304,9 +304,10 @@ export interface JobCounts {
 export function enqueueBatch(
   projectId: number,
   assetIds: number[],
-  jobType: QueueJobType
+  jobType: QueueJobType,
+  profileId?: number
 ): Promise<Job[]> {
-  return invoke("enqueue_batch", { projectId, assetIds, jobType });
+  return invoke("enqueue_batch", { projectId, assetIds, jobType, profileId: profileId ?? null });
 }
 
 export function listQueueJobs(limit = 100): Promise<Job[]> {
@@ -324,4 +325,51 @@ export function retryJob(jobId: number): Promise<void> {
 /** Fires whenever a queue job's status changes (claimed, done, failed). */
 export function onJobUpdated(handler: (job: Job) => void): Promise<UnlistenFn> {
   return listen<Job>("job-updated", (event) => handler(event.payload));
+}
+
+// --- SPHIN-6: SFTP upload ----------------------------------------------------
+
+export type SftpSite = "generic" | "adobe_stock";
+
+export interface SftpProfile {
+  id: number;
+  project_id: number;
+  name: string;
+  site: SftpSite;
+  host: string;
+  port: number;
+  username: string;
+  remote_dir: string;
+  credential_key: string;
+  host_key_fingerprint: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listSftpProfiles(projectId: number): Promise<SftpProfile[]> {
+  return invoke("list_sftp_profiles", { projectId });
+}
+
+export function createSftpProfile(
+  projectId: number,
+  profile: { name: string; site: SftpSite; host: string; port: number; username: string; remote_dir: string },
+  password: string
+): Promise<SftpProfile> {
+  return invoke("create_sftp_profile", { projectId, ...profile, password });
+}
+
+export function updateSftpProfile(
+  id: number,
+  profile: { name: string; site: SftpSite; host: string; port: number; username: string; remote_dir: string },
+  password?: string
+): Promise<void> {
+  return invoke("update_sftp_profile", { id, ...profile, password: password || null });
+}
+
+export function deleteSftpProfile(id: number): Promise<void> {
+  return invoke("delete_sftp_profile", { id });
+}
+
+export function uploadAsset(profileId: number, assetId: number): Promise<void> {
+  return invoke("upload_asset", { profileId, assetId });
 }

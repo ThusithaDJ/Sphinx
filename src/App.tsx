@@ -15,12 +15,16 @@ import {
   type LimiterProfile,
   type ProviderKind,
   type QueueJobType,
+  type SftpProfile,
+  type SftpSite,
   DEFAULT_ANALYSIS_CONFIG,
   DEFAULT_EMBED_CONFIG,
   DEFAULT_KEYWORD_CONFIG,
   analyzeAsset,
   assetCount,
   checkExiftool,
+  createSftpProfile,
+  deleteSftpProfile,
   embedAssetMetadata,
   enqueueBatch,
   enrichKeywords,
@@ -37,6 +41,7 @@ import {
   listAssets,
   listLimiterProfiles,
   listQueueJobs,
+  listSftpProfiles,
   onAssetsIngested,
   onJobUpdated,
   queueJobCounts,
@@ -47,6 +52,7 @@ import {
   setLimiterProfile,
   startWatch,
   stopWatch,
+  uploadAsset,
 } from "./lib/api";
 
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "tif", "tiff", "webp", "bmp", "heic"];
@@ -149,6 +155,21 @@ export default function App() {
   const [jobCounts, setJobCounts] = useState<JobCounts>({ pending: 0, running: 0, done: 0, failed: 0 });
   const [showJobs, setShowJobs] = useState(false);
 
+  // --- SPHIN-6 SFTP upload state ---
+  const [sftpProfiles, setSftpProfiles] = useState<SftpProfile[]>([]);
+  const [showSftpConfig, setShowSftpConfig] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
+  const [newProfile, setNewProfile] = useState({
+    name: "",
+    site: "generic" as SftpSite,
+    host: "",
+    port: 22,
+    username: "",
+    remote_dir: "/",
+    password: "",
+  });
+  const [uploading, setUploading] = useState<Record<number, boolean>>({});
+
   const refresh = useCallback(async () => {
     const [rows, count] = await Promise.all([listAssets(200, 0), assetCount()]);
     setAssets(rows);
@@ -219,6 +240,16 @@ export default function App() {
       })
       .catch(() => setEmbedConfigReady(true));
   }, [runExiftoolCheck]);
+
+  const refreshSftpProfiles = useCallback(async () => {
+    const rows = await listSftpProfiles(PROJECT_ID);
+    setSftpProfiles(rows);
+    setSelectedProfileId((prev) => prev ?? rows[0]?.id ?? null);
+  }, []);
+
+  useEffect(() => {
+    void refreshSftpProfiles();
+  }, [refreshSftpProfiles]);
 
   const refreshJobs = useCallback(async () => {
     const [rows, counts] = await Promise.all([listQueueJobs(200), queueJobCounts()]);
@@ -540,6 +571,50 @@ export default function App() {
     }
   }
 
+  async function handleCreateSftpProfile() {
+    if (!newProfile.name.trim() || !newProfile.host.trim() || !newProfile.username.trim()) {
+      setStatus("Name, host, and username are required for an SFTP profile.");
+      return;
+    }
+    try {
+      const { password, ...rest } = newProfile;
+      await createSftpProfile(PROJECT_ID, rest, password);
+      setNewProfile({ name: "", site: "generic", host: "", port: 22, username: "", remote_dir: "/", password: "" });
+      setStatus(`Added SFTP profile "${rest.name}".`);
+      await refreshSftpProfiles();
+    } catch (err) {
+      setStatus(`Could not add SFTP profile: ${String(err)}`);
+    }
+  }
+
+  async function handleDeleteSftpProfile(profile: SftpProfile) {
+    try {
+      await deleteSftpProfile(profile.id);
+      setStatus(`Deleted SFTP profile "${profile.name}".`);
+      if (selectedProfileId === profile.id) setSelectedProfileId(null);
+      await refreshSftpProfiles();
+    } catch (err) {
+      setStatus(`Could not delete SFTP profile: ${String(err)}`);
+    }
+  }
+
+  async function handleUpload(asset: Asset) {
+    if (!selectedProfileId) {
+      setStatus("Select an SFTP profile first.");
+      return;
+    }
+    setUploading((prev) => ({ ...prev, [asset.id]: true }));
+    try {
+      await uploadAsset(selectedProfileId, asset.id);
+      setStatus(`Uploaded ${asset.path.split(/[\\/]/).pop()}.`);
+      await refresh();
+    } catch (err) {
+      setStatus(`Upload failed: ${String(err)}`);
+    } finally {
+      setUploading((prev) => ({ ...prev, [asset.id]: false }));
+    }
+  }
+
   function eligibleForBatch(jobType: QueueJobType): Asset[] {
     switch (jobType) {
       case "analyze":
@@ -556,6 +631,8 @@ export default function App() {
         return assets.filter((a) => generated[a.id]);
       case "enrich_keywords":
         return hasKeywordProvider ? assets.filter((a) => generated[a.id]) : [];
+      case "upload":
+        return selectedProfileId ? assets.filter((a) => generated[a.id]) : [];
     }
   }
 
@@ -569,7 +646,8 @@ export default function App() {
       await enqueueBatch(
         PROJECT_ID,
         targets.map((a) => a.id),
-        jobType
+        jobType,
+        jobType === "upload" ? selectedProfileId ?? undefined : undefined
       );
       setStatus(`Queued ${targets.length} asset(s) for "${label}".`);
       setShowJobs(true);
@@ -610,7 +688,8 @@ export default function App() {
         <h1>Sphinx</h1>
         <p className="subtitle">
           Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3) ·
-          Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5) · Job orchestration (SPHIN-7)
+          Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5) · Job orchestration (SPHIN-7) ·
+          Upload & distribution (SPHIN-6)
         </p>
       </header>
 
@@ -891,6 +970,97 @@ export default function App() {
       <section className="analysis-config">
         <div className="analysis-config-head">
           <h2>
+            SFTP upload <span className="count">· {sftpProfiles.length} profile(s)</span>
+          </h2>
+          <button onClick={() => setShowSftpConfig((v) => !v)}>{showSftpConfig ? "Hide" : "Configure"}</button>
+        </div>
+
+        {showSftpConfig && (
+          <div className="config-form">
+            {sftpProfiles.map((p) => (
+              <div key={p.id} className="dropzone-actions" style={{ justifyContent: "space-between" }}>
+                <span>
+                  {p.name} — {p.username}@{p.host}:{p.port}{p.remote_dir} ({p.site})
+                  {!p.host_key_fingerprint && <span className="muted"> · not yet connected</span>}
+                </span>
+                <button className="link-btn" onClick={() => handleDeleteSftpProfile(p)}>
+                  Delete
+                </button>
+              </div>
+            ))}
+            <label>
+              Name
+              <input
+                type="text"
+                placeholder="e.g. Adobe Stock"
+                value={newProfile.name}
+                onChange={(e) => setNewProfile((p) => ({ ...p, name: e.target.value }))}
+              />
+            </label>
+            <label>
+              Site
+              <select
+                value={newProfile.site}
+                onChange={(e) => setNewProfile((p) => ({ ...p, site: e.target.value as SftpSite }))}
+              >
+                <option value="generic">Generic</option>
+                <option value="adobe_stock">Adobe Stock</option>
+              </select>
+            </label>
+            <label>
+              Host
+              <input
+                type="text"
+                placeholder="sftp.example.com"
+                value={newProfile.host}
+                onChange={(e) => setNewProfile((p) => ({ ...p, host: e.target.value }))}
+              />
+            </label>
+            <label>
+              Port
+              <input
+                type="number"
+                value={newProfile.port}
+                onChange={(e) => setNewProfile((p) => ({ ...p, port: Number(e.target.value) || 22 }))}
+              />
+            </label>
+            <label>
+              Username
+              <input
+                type="text"
+                value={newProfile.username}
+                onChange={(e) => setNewProfile((p) => ({ ...p, username: e.target.value }))}
+              />
+            </label>
+            <label>
+              Remote directory
+              <input
+                type="text"
+                value={newProfile.remote_dir}
+                onChange={(e) => setNewProfile((p) => ({ ...p, remote_dir: e.target.value }))}
+              />
+            </label>
+            <label>
+              Password <span className="hint">(stored in the OS credential store, not sphinx.db)</span>
+              <input
+                type="password"
+                autoComplete="off"
+                value={newProfile.password}
+                onChange={(e) => setNewProfile((p) => ({ ...p, password: e.target.value }))}
+              />
+            </label>
+            <div className="config-actions">
+              <button onClick={handleCreateSftpProfile} className="btn-active">
+                Add profile
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="analysis-config">
+        <div className="analysis-config-head">
+          <h2>
             Jobs{" "}
             <span className="count">
               · {jobCounts.pending} pending · {jobCounts.running} running · {jobCounts.done} done ·{" "}
@@ -910,6 +1080,23 @@ export default function App() {
               <button onClick={() => handleEnqueueBatch("embed", "Embed")}>Queue: Embed all</button>
               <button onClick={() => handleEnqueueBatch("enrich_keywords", "Enrich keywords")}>
                 Queue: Enrich keywords
+              </button>
+              <select
+                value={selectedProfileId ?? ""}
+                onChange={(e) => setSelectedProfileId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">Select SFTP profile…</option>
+                {sftpProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                disabled={!selectedProfileId}
+                onClick={() => handleEnqueueBatch("upload", "Upload")}
+              >
+                Queue: Upload all
               </button>
             </div>
             <table>
@@ -1066,6 +1253,19 @@ export default function App() {
                                 onClick={() => handleEnrich(asset)}
                               >
                                 Enrich
+                              </button>
+                            ))}
+                          {meta &&
+                            (uploading[asset.id] ? (
+                              <span className="muted">uploading…</span>
+                            ) : (
+                              <button
+                                className="link-btn"
+                                disabled={!selectedProfileId}
+                                title={!selectedProfileId ? "Select an SFTP profile first" : ""}
+                                onClick={() => handleUpload(asset)}
+                              >
+                                Upload
                               </button>
                             ))}
                         </>

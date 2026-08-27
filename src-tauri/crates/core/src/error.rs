@@ -39,6 +39,10 @@ pub enum CoreError {
     /// An external CLI tool (exiftool) couldn't be run, or exited non-zero.
     #[error("{tool} error: {message}")]
     ExternalTool { tool: String, message: String },
+    // --- SPHIN-6: SFTP upload ---
+    /// Connecting, authenticating, or transferring over SFTP failed.
+    #[error("SFTP error: {0}")]
+    Sftp(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

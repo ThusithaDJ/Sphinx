@@ -8,9 +8,9 @@ use crate::embed::EmbedConfig;
 use crate::error::Result;
 use crate::keywords::KeywordConfig;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
-use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project};
+use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project, SftpProfileRecord};
 
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 /// Key under which the per-project analysis config JSON is stored in
 /// `project_settings`.
@@ -80,6 +80,9 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if current < 5 {
         migrate_v5(conn)?;
+    }
+    if current < 6 {
+        migrate_v6(conn)?;
     }
 
     conn.execute(
@@ -230,6 +233,33 @@ fn migrate_v5(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v6 (SPHIN-6): SFTP connection profiles, and a `not_before` column on
+/// `jobs` for exponential backoff on automatic retry (SPHIN-26).
+fn migrate_v6(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS sftp_profiles (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id            INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            name                  TEXT NOT NULL,
+            site                  TEXT NOT NULL DEFAULT 'generic',
+            host                  TEXT NOT NULL,
+            port                  INTEGER NOT NULL,
+            username              TEXT NOT NULL,
+            remote_dir            TEXT NOT NULL,
+            credential_key        TEXT NOT NULL UNIQUE,
+            host_key_fingerprint  TEXT,
+            created_at            TEXT NOT NULL,
+            updated_at            TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sftp_profiles_project_id ON sftp_profiles(project_id);
+        "#,
+    )?;
+    add_column_if_missing(conn, "jobs", "not_before", "TEXT")?;
+    Ok(())
+}
+
 /// SQLite has no `ADD COLUMN IF NOT EXISTS`; emulate it via `pragma_table_info`.
 fn add_column_if_missing(
     conn: &Connection,
@@ -360,6 +390,7 @@ pub fn insert_job(conn: &Connection, asset_id: i64, job_type: &str) -> Result<Jo
         source: "direct".to_string(),
         payload_json: "{}".to_string(),
         attempts: 0,
+        not_before: None,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -406,6 +437,7 @@ pub fn enqueue_jobs(
             source: "queue".to_string(),
             payload_json: payload_json.to_string(),
             attempts: 0,
+            not_before: None,
             created_at: now.clone(),
             updated_at: now.clone(),
         });
@@ -413,16 +445,20 @@ pub fn enqueue_jobs(
     Ok(jobs)
 }
 
-/// Atomically claim the oldest pending queue job, transitioning it to
-/// `running`. Safe under concurrent callers only in that they all serialize
-/// through the same [`Connection`] (guarded by a `Mutex` at the app layer);
-/// this function does not itself provide cross-connection locking.
+/// Atomically claim the oldest pending, currently-eligible (past its
+/// `not_before`, if any) queue job, transitioning it to `running`. Safe
+/// under concurrent callers only in that they all serialize through the
+/// same [`Connection`] (guarded by a `Mutex` at the app layer); this
+/// function does not itself provide cross-connection locking.
 pub fn claim_next_pending_job(conn: &Connection) -> Result<Option<Job>> {
+    let now = Utc::now().to_rfc3339();
     let job = conn
         .query_row(
-            "SELECT id, asset_id, job_type, status, error, source, payload_json, attempts, created_at, updated_at
-             FROM jobs WHERE status = 'pending' AND source = 'queue' ORDER BY id ASC LIMIT 1",
-            [],
+            "SELECT id, asset_id, job_type, status, error, source, payload_json, attempts, not_before, created_at, updated_at
+             FROM jobs
+             WHERE status = 'pending' AND source = 'queue' AND (not_before IS NULL OR not_before <= ?1)
+             ORDER BY id ASC LIMIT 1",
+            params![now],
             row_to_job,
         )
         .optional()?;
@@ -439,13 +475,26 @@ pub fn claim_next_pending_job(conn: &Connection) -> Result<Option<Job>> {
     }))
 }
 
-/// Reset a failed (or stuck) queue job back to `pending` for another attempt,
-/// clearing its error and bumping `attempts`. SPHIN-30.
+/// Reset a failed (or stuck) queue job back to `pending` for an immediate
+/// manual retry, clearing its error/backoff and bumping `attempts`. SPHIN-30.
 pub fn retry_job(conn: &Connection, job_id: i64) -> Result<()> {
     conn.execute(
-        "UPDATE jobs SET status = 'pending', error = NULL, attempts = attempts + 1, updated_at = ?2
+        "UPDATE jobs SET status = 'pending', error = NULL, not_before = NULL, attempts = attempts + 1, updated_at = ?2
          WHERE id = ?1 AND source = 'queue'",
         params![job_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Automatic backoff retry (SPHIN-26): reschedule a failed queue job to
+/// become claimable again after `delay_secs`, keeping `error` visible in
+/// the meantime so the dashboard shows why it's about to retry.
+pub fn schedule_retry(conn: &Connection, job_id: i64, delay_secs: i64, error: &str) -> Result<()> {
+    let not_before = (Utc::now() + chrono::Duration::seconds(delay_secs)).to_rfc3339();
+    conn.execute(
+        "UPDATE jobs SET status = 'pending', attempts = attempts + 1, not_before = ?2, error = ?3, updated_at = ?4
+         WHERE id = ?1",
+        params![job_id, not_before, error, Utc::now().to_rfc3339()],
     )?;
     Ok(())
 }
@@ -454,7 +503,7 @@ pub fn retry_job(conn: &Connection, job_id: i64) -> Result<()> {
 /// recent first, for the progress dashboard. SPHIN-29.
 pub fn list_queue_jobs(conn: &Connection, limit: i64) -> Result<Vec<Job>> {
     let mut stmt = conn.prepare(
-        "SELECT id, asset_id, job_type, status, error, source, payload_json, attempts, created_at, updated_at
+        "SELECT id, asset_id, job_type, status, error, source, payload_json, attempts, not_before, created_at, updated_at
          FROM jobs WHERE source = 'queue' ORDER BY id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], row_to_job)?;
@@ -490,6 +539,112 @@ pub fn queue_job_counts(conn: &Connection) -> Result<JobCounts> {
         }
     }
     Ok(counts)
+}
+
+// --- SFTP profiles (SPHIN-25) -------------------------------------------------
+
+/// Create a connection profile. The password is not part of this call --
+/// callers save it separately via [`crate::secrets::set_secret`] under the
+/// returned profile's `credential_key`.
+pub fn create_sftp_profile(
+    conn: &Connection,
+    project_id: i64,
+    name: &str,
+    site: &str,
+    host: &str,
+    port: i64,
+    username: &str,
+    remote_dir: &str,
+) -> Result<SftpProfileRecord> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO sftp_profiles
+            (project_id, name, site, host, port, username, remote_dir, credential_key, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, ?8)",
+        params![project_id, name, site, host, port, username, remote_dir, now],
+    )?;
+    let id = conn.last_insert_rowid();
+    // The credential key is derived from the row id, so it can't be chosen
+    // until after the insert; a second statement fills it in.
+    let credential_key = format!("sftp-profile-{id}");
+    conn.execute(
+        "UPDATE sftp_profiles SET credential_key = ?2 WHERE id = ?1",
+        params![id, credential_key],
+    )?;
+    Ok(SftpProfileRecord {
+        id,
+        project_id,
+        name: name.to_string(),
+        site: site.to_string(),
+        host: host.to_string(),
+        port,
+        username: username.to_string(),
+        remote_dir: remote_dir.to_string(),
+        credential_key,
+        host_key_fingerprint: None,
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+pub fn list_sftp_profiles(conn: &Connection, project_id: i64) -> Result<Vec<SftpProfileRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, name, site, host, port, username, remote_dir, credential_key, host_key_fingerprint, created_at, updated_at
+         FROM sftp_profiles WHERE project_id = ?1 ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map(params![project_id], row_to_sftp_profile)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+pub fn get_sftp_profile(conn: &Connection, id: i64) -> Result<Option<SftpProfileRecord>> {
+    conn.query_row(
+        "SELECT id, project_id, name, site, host, port, username, remote_dir, credential_key, host_key_fingerprint, created_at, updated_at
+         FROM sftp_profiles WHERE id = ?1",
+        params![id],
+        row_to_sftp_profile,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+/// Update everything about a profile except its `credential_key` and
+/// `host_key_fingerprint`, which have their own dedicated setters.
+#[allow(clippy::too_many_arguments)]
+pub fn update_sftp_profile(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    site: &str,
+    host: &str,
+    port: i64,
+    username: &str,
+    remote_dir: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE sftp_profiles SET name = ?2, site = ?3, host = ?4, port = ?5, username = ?6, remote_dir = ?7, updated_at = ?8
+         WHERE id = ?1",
+        params![id, name, site, host, port, username, remote_dir, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Pin (or update) the host key fingerprint seen on a successful connection
+/// (trust-on-first-use, SPHIN-6).
+pub fn set_sftp_host_key_fingerprint(conn: &Connection, id: i64, fingerprint: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE sftp_profiles SET host_key_fingerprint = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, fingerprint, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+pub fn delete_sftp_profile(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM sftp_profiles WHERE id = ?1", params![id])?;
+    Ok(())
 }
 
 // --- projects & settings (SPHIN-2 / SPHIN-17) ------------------------------
@@ -806,8 +961,26 @@ fn row_to_job(row: &rusqlite::Row) -> rusqlite::Result<Job> {
         source: row.get(5)?,
         payload_json: row.get(6)?,
         attempts: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        not_before: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn row_to_sftp_profile(row: &rusqlite::Row) -> rusqlite::Result<SftpProfileRecord> {
+    Ok(SftpProfileRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        name: row.get(2)?,
+        site: row.get(3)?,
+        host: row.get(4)?,
+        port: row.get(5)?,
+        username: row.get(6)?,
+        remote_dir: row.get(7)?,
+        credential_key: row.get(8)?,
+        host_key_fingerprint: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 
@@ -1061,6 +1234,57 @@ mod tests {
         let jobs = list_queue_jobs(&conn, 10).unwrap();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].source, "queue");
+    }
+
+    #[test]
+    fn schedule_retry_sets_a_future_not_before_and_keeps_the_job_uncclaimable_until_then() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let job = &enqueue_jobs(&conn, &[a.id], "upload", "{}").unwrap()[0];
+        claim_next_pending_job(&conn).unwrap();
+
+        schedule_retry(&conn, job.id, 3600, "transient network error").unwrap();
+
+        // Not eligible yet: the backoff window hasn't passed.
+        assert!(claim_next_pending_job(&conn).unwrap().is_none());
+
+        // Force the window into the past and it becomes claimable again.
+        conn.execute(
+            "UPDATE jobs SET not_before = ?1 WHERE id = ?2",
+            params![(Utc::now() - chrono::Duration::seconds(1)).to_rfc3339(), job.id],
+        )
+        .unwrap();
+        let claimed = claim_next_pending_job(&conn).unwrap().unwrap();
+        assert_eq!(claimed.id, job.id);
+        assert_eq!(claimed.attempts, 1);
+        assert_eq!(claimed.error.as_deref(), Some("transient network error"));
+    }
+
+    #[test]
+    fn sftp_profile_crud_roundtrips_and_derives_a_credential_key() {
+        let conn = open_in_memory().unwrap();
+        assert!(list_sftp_profiles(&conn, 1).unwrap().is_empty());
+
+        let profile = create_sftp_profile(&conn, 1, "Adobe Stock", "adobe_stock", "sftp.adobe.io", 22, "alice", "/incoming")
+            .unwrap();
+        assert_eq!(profile.credential_key, format!("sftp-profile-{}", profile.id));
+
+        let fetched = get_sftp_profile(&conn, profile.id).unwrap().unwrap();
+        assert_eq!(fetched.host, "sftp.adobe.io");
+        assert!(fetched.host_key_fingerprint.is_none());
+
+        set_sftp_host_key_fingerprint(&conn, profile.id, "abc123").unwrap();
+        update_sftp_profile(&conn, profile.id, "Adobe Stock (renamed)", "adobe_stock", "sftp.adobe.io", 22, "alice", "/incoming/new")
+            .unwrap();
+        let updated = get_sftp_profile(&conn, profile.id).unwrap().unwrap();
+        assert_eq!(updated.name, "Adobe Stock (renamed)");
+        assert_eq!(updated.remote_dir, "/incoming/new");
+        assert_eq!(updated.host_key_fingerprint.as_deref(), Some("abc123"));
+
+        assert_eq!(list_sftp_profiles(&conn, 1).unwrap().len(), 1);
+
+        delete_sftp_profile(&conn, profile.id).unwrap();
+        assert!(get_sftp_profile(&conn, profile.id).unwrap().is_none());
     }
 
     #[test]

@@ -8,9 +8,11 @@ use sphinx_core::db::JobCounts;
 use sphinx_core::embed::{EmbedConfig, EmbedOutcome, ExportRow};
 use sphinx_core::keywords::{AdobeStockProvider, KeywordConfig, KeywordProvider, ShutterstockProvider};
 use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
-use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Job, MetadataRecord, Project};
+use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Job, MetadataRecord, Project, SftpProfileRecord};
+use sphinx_core::secrets;
+use sphinx_core::upload::{SftpProfile, SftpSite};
 use sphinx_core::watch::WatchHandle;
-use sphinx_core::{analysis, db, embed, ingest, metadata};
+use sphinx_core::{analysis, db, embed, ingest, metadata, upload};
 use tauri::{Emitter, Manager};
 
 /// Shared app state: the SQLite connection and the current folder-watch
@@ -652,8 +654,14 @@ async fn enrich_keywords(
 
 // --- job orchestration (SPHIN-7) ---------------------------------------------
 
-const QUEUE_JOB_TYPES: [&str; 4] = ["analyze", "generate_metadata", "embed", "enrich_keywords"];
+const QUEUE_JOB_TYPES: [&str; 5] = ["analyze", "generate_metadata", "embed", "enrich_keywords", "upload"];
 const QUEUE_POLL_INTERVAL_MS: u64 = 400;
+/// After this many automatic retries a job is left `failed` for manual
+/// retry rather than being rescheduled again. SPHIN-26.
+const MAX_AUTO_RETRIES: i64 = 3;
+/// Delay before each automatic retry, indexed by the job's attempt count
+/// (clamped to the last entry once exhausted).
+const BACKOFF_SCHEDULE_SECS: [i64; 3] = [10, 60, 300];
 
 /// Enqueue one batch job per asset for the background worker to pick up.
 /// `job_type` is one of [`QUEUE_JOB_TYPES`]. SPHIN-28.
@@ -663,11 +671,15 @@ fn enqueue_batch(
     project_id: i64,
     asset_ids: Vec<i64>,
     job_type: String,
+    profile_id: Option<i64>,
 ) -> Result<Vec<Job>, String> {
     if !QUEUE_JOB_TYPES.contains(&job_type.as_str()) {
         return Err(format!("unknown job type: {job_type}"));
     }
-    let payload = serde_json::json!({ "project_id": project_id }).to_string();
+    if job_type == "upload" && profile_id.is_none() {
+        return Err("upload jobs require an SFTP profile_id".to_string());
+    }
+    let payload = serde_json::json!({ "project_id": project_id, "profile_id": profile_id }).to_string();
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::enqueue_jobs(&conn, &asset_ids, &job_type, &payload).map_err(|e| e.to_string())
 }
@@ -696,6 +708,8 @@ fn retry_job(state: tauri::State<AppState>, job_id: i64) -> Result<(), String> {
 struct QueueJobPayload {
     #[serde(default = "default_project_id")]
     project_id: i64,
+    #[serde(default)]
+    profile_id: Option<i64>,
 }
 
 fn default_project_id() -> i64 {
@@ -707,8 +721,10 @@ fn default_project_id() -> i64 {
 /// them, so there is exactly one implementation of each operation to keep
 /// correct.
 async fn execute_queue_job(app: &tauri::AppHandle, job: &Job) -> Result<(), String> {
-    let payload: QueueJobPayload =
-        serde_json::from_str(&job.payload_json).unwrap_or(QueueJobPayload { project_id: 1 });
+    let payload: QueueJobPayload = serde_json::from_str(&job.payload_json).unwrap_or(QueueJobPayload {
+        project_id: 1,
+        profile_id: None,
+    });
     let state: tauri::State<'_, AppState> = app.state();
 
     match job.job_type.as_str() {
@@ -722,6 +738,12 @@ async fn execute_queue_job(app: &tauri::AppHandle, job: &Job) -> Result<(), Stri
         "enrich_keywords" => enrich_keywords(state, payload.project_id, job.asset_id)
             .await
             .map(|_| ()),
+        "upload" => {
+            let profile_id = payload
+                .profile_id
+                .ok_or_else(|| "upload job is missing a profile_id".to_string())?;
+            upload_asset(state, profile_id, job.asset_id).await
+        }
         other => Err(format!("unknown job type: {other}")),
     }
 }
@@ -754,26 +776,192 @@ fn spawn_job_worker(app: tauri::AppHandle) {
 
             let result = execute_queue_job(&app, &job).await;
 
-            let (status, error): (&str, Option<String>) = match &result {
-                Ok(()) => ("done", None),
-                Err(e) => ("failed", Some(e.clone())),
+            let updated = match &result {
+                Ok(()) => {
+                    let state: tauri::State<'_, AppState> = app.state();
+                    let conn = match state.db.lock() {
+                        Ok(c) => c,
+                        Err(_) => break,
+                    };
+                    let _ = db::set_job_status(&conn, job.id, "done", None);
+                    Job {
+                        status: "done".to_string(),
+                        error: None,
+                        ..job
+                    }
+                }
+                Err(e) => {
+                    if job.attempts < MAX_AUTO_RETRIES {
+                        let delay = BACKOFF_SCHEDULE_SECS
+                            [(job.attempts as usize).min(BACKOFF_SCHEDULE_SECS.len() - 1)];
+                        let state: tauri::State<'_, AppState> = app.state();
+                        let conn = match state.db.lock() {
+                            Ok(c) => c,
+                            Err(_) => break,
+                        };
+                        let _ = db::schedule_retry(&conn, job.id, delay, e);
+                        Job {
+                            status: "pending".to_string(),
+                            error: Some(e.clone()),
+                            attempts: job.attempts + 1,
+                            ..job
+                        }
+                    } else {
+                        let state: tauri::State<'_, AppState> = app.state();
+                        let conn = match state.db.lock() {
+                            Ok(c) => c,
+                            Err(_) => break,
+                        };
+                        let _ = db::set_job_status(&conn, job.id, "failed", Some(e));
+                        Job {
+                            status: "failed".to_string(),
+                            error: Some(e.clone()),
+                            ..job
+                        }
+                    }
+                }
             };
-            let updated = Job {
-                status: status.to_string(),
-                error: error.clone(),
-                ..job
-            };
-            {
-                let state: tauri::State<'_, AppState> = app.state();
-                let conn = match state.db.lock() {
-                    Ok(c) => c,
-                    Err(_) => break,
-                };
-                let _ = db::set_job_status(&conn, updated.id, status, error.as_deref());
-            }
             let _ = app.emit("job-updated", &updated);
         }
     });
+}
+
+// --- SFTP upload (SPHIN-6) ----------------------------------------------------
+
+fn site_to_str(site: &str) -> SftpSite {
+    match site {
+        "adobe_stock" => SftpSite::AdobeStock,
+        _ => SftpSite::Generic,
+    }
+}
+
+fn sftp_profile_from_record(r: &SftpProfileRecord) -> SftpProfile {
+    SftpProfile {
+        id: r.id,
+        name: r.name.clone(),
+        site: site_to_str(&r.site),
+        host: r.host.clone(),
+        port: r.port as u16,
+        username: r.username.clone(),
+        remote_dir: r.remote_dir.clone(),
+        credential_key: r.credential_key.clone(),
+        host_key_fingerprint: r.host_key_fingerprint.clone(),
+    }
+}
+
+#[tauri::command]
+fn list_sftp_profiles(state: tauri::State<AppState>, project_id: i64) -> Result<Vec<SftpProfileRecord>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::list_sftp_profiles(&conn, project_id).map_err(|e| e.to_string())
+}
+
+/// Create a connection profile and save its password (if given) in the OS
+/// credential store. SPHIN-25.
+#[tauri::command]
+fn create_sftp_profile(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    name: String,
+    site: String,
+    host: String,
+    port: i64,
+    username: String,
+    remote_dir: String,
+    password: String,
+) -> Result<SftpProfileRecord, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let profile = db::create_sftp_profile(&conn, project_id, &name, &site, &host, port, &username, &remote_dir)
+        .map_err(|e| e.to_string())?;
+    if !password.is_empty() {
+        secrets::set_secret(&profile.credential_key, &password).map_err(|e| e.to_string())?;
+    }
+    Ok(profile)
+}
+
+/// Update a profile's connection details; `password`, if given, replaces
+/// the saved credential (an empty/omitted password leaves it untouched).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn update_sftp_profile(
+    state: tauri::State<AppState>,
+    id: i64,
+    name: String,
+    site: String,
+    host: String,
+    port: i64,
+    username: String,
+    remote_dir: String,
+    password: Option<String>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::update_sftp_profile(&conn, id, &name, &site, &host, port, &username, &remote_dir)
+        .map_err(|e| e.to_string())?;
+    if let Some(pw) = password {
+        if !pw.is_empty() {
+            let profile = db::get_sftp_profile(&conn, id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("SFTP profile {id} not found"))?;
+            secrets::set_secret(&profile.credential_key, &pw).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_sftp_profile(state: tauri::State<AppState>, id: i64) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(profile) = db::get_sftp_profile(&conn, id).map_err(|e| e.to_string())? {
+        let _ = secrets::delete_secret(&profile.credential_key);
+    }
+    db::delete_sftp_profile(&conn, id).map_err(|e| e.to_string())
+}
+
+/// Upload one asset's file to an SFTP profile's remote directory, pinning
+/// the host key on first connect (or verifying it on later ones). Runs on
+/// the blocking thread pool since the transport is a blocking call
+/// internally. SPHIN-6 (25/26/27).
+#[tauri::command]
+async fn upload_asset(
+    state: tauri::State<'_, AppState>,
+    profile_id: i64,
+    asset_id: i64,
+) -> Result<(), String> {
+    let (record, password, asset) = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        let record = db::get_sftp_profile(&conn, profile_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("SFTP profile {profile_id} not found"))?;
+        let password = secrets::get_secret(&record.credential_key)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no password saved for this SFTP profile".to_string())?;
+        let asset = db::get_asset(&conn, asset_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("asset {asset_id} not found"))?;
+        (record, password, asset)
+    };
+
+    let profile = sftp_profile_from_record(&record);
+    let filename = asset
+        .path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&asset.path)
+        .to_string();
+    let local_path = std::path::PathBuf::from(&asset.path);
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        upload::upload_file(&profile, &password, &local_path, &filename)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    if record.host_key_fingerprint.as_deref() != Some(outcome.host_key_fingerprint.as_str()) {
+        let _ = db::set_sftp_host_key_fingerprint(&conn, record.id, &outcome.host_key_fingerprint);
+    }
+    db::set_asset_status(&conn, asset_id, "uploaded").map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -824,6 +1012,11 @@ pub fn run() {
             list_queue_jobs,
             queue_job_counts,
             retry_job,
+            list_sftp_profiles,
+            create_sftp_profile,
+            update_sftp_profile,
+            delete_sftp_profile,
+            upload_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

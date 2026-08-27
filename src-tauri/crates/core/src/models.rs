@@ -61,12 +61,36 @@ pub struct Job {
     pub payload_json: String,
     #[serde(default)]
     pub attempts: i64,
+    /// A queue job claimable only once this timestamp (RFC3339) has passed;
+    /// `None` means claimable immediately. Used for exponential backoff on
+    /// automatic retry (SPHIN-26).
+    #[serde(default)]
+    pub not_before: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 fn default_job_payload() -> String {
     "{}".to_string()
+}
+
+/// A row in the `sftp_profiles` table: a named SFTP connection profile for
+/// one stock site (SPHIN-25). The password lives in the OS credential store
+/// under `credential_key`, never here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SftpProfileRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub name: String,
+    pub site: String,
+    pub host: String,
+    pub port: i64,
+    pub username: String,
+    pub remote_dir: String,
+    pub credential_key: String,
+    pub host_key_fingerprint: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// A row in the `projects` table. A project is a working set of assets that
