@@ -192,3 +192,44 @@ export function generateMetadata(
 ): Promise<MetadataResponse> {
   return invoke("generate_metadata", { projectId, assetId });
 }
+
+// --- SPHIN-4: metadata embedding (IPTC/XMP via exiftool) + CSV export -------
+
+export interface EmbedConfig {
+  /** Empty string => look up "exiftool" on PATH. */
+  exiftool_path: string;
+}
+
+export const DEFAULT_EMBED_CONFIG: EmbedConfig = { exiftool_path: "" };
+
+export interface EmbedOutcome {
+  updated: boolean;
+  message: string;
+}
+
+export function getEmbedConfig(projectId: number): Promise<EmbedConfig | null> {
+  return invoke("get_embed_config", { projectId });
+}
+
+export function setEmbedConfig(projectId: number, config: EmbedConfig): Promise<void> {
+  return invoke("set_embed_config", { projectId, config });
+}
+
+/** Resolves to exiftool's version string, or rejects if it isn't reachable. */
+export function checkExiftool(projectId: number): Promise<string> {
+  return invoke("check_exiftool", { projectId });
+}
+
+export function embedAssetMetadata(
+  projectId: number,
+  assetId: number
+): Promise<EmbedOutcome> {
+  return invoke("embed_asset_metadata", { projectId, assetId });
+}
+
+export function exportMetadataCsv(
+  assetIds: number[],
+  targetPath: string
+): Promise<void> {
+  return invoke("export_metadata_csv", { assetIds, targetPath });
+}

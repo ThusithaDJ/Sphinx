@@ -1,21 +1,27 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import {
   type AnalysisConfig,
   type AnalysisResult,
   type Asset,
+  type EmbedConfig,
   type GeneratedMetadata,
   type IngestSummary,
   type LimiterProfile,
   type ProviderKind,
   DEFAULT_ANALYSIS_CONFIG,
+  DEFAULT_EMBED_CONFIG,
   analyzeAsset,
   assetCount,
+  checkExiftool,
+  embedAssetMetadata,
+  exportMetadataCsv,
   generateMetadata,
   getAnalysis,
   getAnalysisConfig,
+  getEmbedConfig,
   getLimiterProfile,
   getMetadata,
   ingestFiles,
@@ -24,6 +30,7 @@ import {
   listLimiterProfiles,
   onAssetsIngested,
   setAnalysisConfig,
+  setEmbedConfig,
   setLimiterProfile,
   startWatch,
   stopWatch,
@@ -109,6 +116,14 @@ export default function App() {
   const [generated, setGenerated] = useState<Record<number, GeneratedMetadata>>({});
   const [generating, setGenerating] = useState<Record<number, boolean>>({});
 
+  // --- SPHIN-4 metadata embedding state ---
+  const [embedConfig, setEmbedConfigState] = useState<EmbedConfig>(DEFAULT_EMBED_CONFIG);
+  const [embedConfigReady, setEmbedConfigReady] = useState(false);
+  const [embedConfigDirty, setEmbedConfigDirty] = useState(false);
+  const [showEmbedConfig, setShowEmbedConfig] = useState(false);
+  const [exiftoolStatus, setExiftoolStatus] = useState<string>("checking…");
+  const [embedding, setEmbedding] = useState<Record<number, boolean>>({});
+
   const refresh = useCallback(async () => {
     const [rows, count] = await Promise.all([listAssets(200, 0), assetCount()]);
     setAssets(rows);
@@ -159,6 +174,26 @@ export default function App() {
       })
       .catch(() => setProfileReady(true));
   }, []);
+
+  const runExiftoolCheck = useCallback(async () => {
+    setExiftoolStatus("checking…");
+    try {
+      const version = await checkExiftool(PROJECT_ID);
+      setExiftoolStatus(`found (v${version})`);
+    } catch (err) {
+      setExiftoolStatus(`not found: ${String(err)}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    getEmbedConfig(PROJECT_ID)
+      .then((saved) => {
+        setEmbedConfigState(saved ?? DEFAULT_EMBED_CONFIG);
+        setEmbedConfigReady(true);
+        void runExiftoolCheck();
+      })
+      .catch(() => setEmbedConfigReady(true));
+  }, [runExiftoolCheck]);
 
   // Backfill stored metadata for any assets we haven't loaded one for yet.
   const loadedMetadataIds = useRef<Set<number>>(new Set());
@@ -324,6 +359,58 @@ export default function App() {
     }
   }
 
+  function patchEmbedConfig(patch: Partial<EmbedConfig>) {
+    setEmbedConfigState((prev) => ({ ...prev, ...patch }));
+    setEmbedConfigDirty(true);
+  }
+
+  async function handleSaveEmbedConfig() {
+    try {
+      await setEmbedConfig(PROJECT_ID, embedConfig);
+      setEmbedConfigDirty(false);
+      setStatus("Saved exiftool configuration.");
+      await runExiftoolCheck();
+    } catch (err) {
+      setStatus(`Could not save exiftool configuration: ${String(err)}`);
+    }
+  }
+
+  async function handleEmbed(asset: Asset) {
+    setEmbedding((prev) => ({ ...prev, [asset.id]: true }));
+    try {
+      const outcome = await embedAssetMetadata(PROJECT_ID, asset.id);
+      setStatus(
+        outcome.updated
+          ? `Embedded metadata into ${asset.path.split(/[\\/]/).pop()}.`
+          : `Exiftool ran but reported no changes for ${asset.path.split(/[\\/]/).pop()}.`
+      );
+      await refresh();
+    } catch (err) {
+      setStatus(`Embedding failed: ${String(err)}`);
+    } finally {
+      setEmbedding((prev) => ({ ...prev, [asset.id]: false }));
+    }
+  }
+
+  async function handleExportCsv() {
+    const assetIds = assets.filter((a) => generated[a.id]).map((a) => a.id);
+    if (assetIds.length === 0) {
+      setStatus("No assets have generated metadata to export yet.");
+      return;
+    }
+    const targetPath = await save({
+      defaultPath: "sphinx-metadata.csv",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!targetPath) return;
+    try {
+      await exportMetadataCsv(assetIds, targetPath);
+      setStatus(`Exported metadata for ${assetIds.length} asset(s) to ${targetPath}.`);
+    } catch (err) {
+      setStatus(`Export failed: ${String(err)}`);
+    }
+  }
+
   async function handleAnalyze(asset: Asset) {
     setAnalyzing((prev) => ({ ...prev, [asset.id]: true }));
     setStatus(`Analyzing ${asset.path.split(/[\\/]/).pop()}…`);
@@ -345,7 +432,8 @@ export default function App() {
       <header className="app-header">
         <h1>Sphinx</h1>
         <p className="subtitle">
-          Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3)
+          Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3) ·
+          Metadata embedding (SPHIN-4)
         </p>
       </header>
 
@@ -520,10 +608,47 @@ export default function App() {
         )}
       </section>
 
+      <section className="analysis-config">
+        <div className="analysis-config-head">
+          <h2>
+            File embedding{" "}
+            <span className="count">
+              · exiftool {embedConfigReady ? exiftoolStatus : "loading…"}
+            </span>
+          </h2>
+          <button onClick={() => setShowEmbedConfig((v) => !v)}>
+            {showEmbedConfig ? "Hide" : "Configure"}
+          </button>
+        </div>
+
+        {showEmbedConfig && (
+          <div className="config-form">
+            <label>
+              exiftool path <span className="hint">(blank = look up on PATH)</span>
+              <input
+                type="text"
+                placeholder="e.g. C:\Tools\exiftool.exe"
+                value={embedConfig.exiftool_path}
+                onChange={(e) => patchEmbedConfig({ exiftool_path: e.target.value })}
+              />
+            </label>
+            <div className="config-actions">
+              <button onClick={handleSaveEmbedConfig} disabled={!embedConfigDirty} className="btn-active">
+                Save
+              </button>
+              <button onClick={() => runExiftoolCheck()}>Re-check</button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <section className="assets">
-        <h2>
-          Assets <span className="count">({total})</span>
-        </h2>
+        <div className="analysis-config-head">
+          <h2>
+            Assets <span className="count">({total})</span>
+          </h2>
+          <button onClick={handleExportCsv}>Export CSV…</button>
+        </div>
         <table>
           <thead>
             <tr>
@@ -608,6 +733,14 @@ export default function App() {
                               {expanded[asset.id] ? "Hide" : "View"}
                             </button>
                           )}
+                          {meta &&
+                            (embedding[asset.id] ? (
+                              <span className="muted">embedding…</span>
+                            ) : (
+                              <button className="link-btn" onClick={() => handleEmbed(asset)}>
+                                Embed
+                              </button>
+                            ))}
                         </>
                       )}
                     </td>

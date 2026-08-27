@@ -35,6 +35,10 @@ pub enum CoreError {
     /// (missing fields, non-JSON model output, refusal, ...).
     #[error("could not parse {provider} response: {message}")]
     BadResponse { provider: String, message: String },
+    // --- SPHIN-4: metadata embedding ---
+    /// An external CLI tool (exiftool) couldn't be run, or exited non-zero.
+    #[error("{tool} error: {message}")]
+    ExternalTool { tool: String, message: String },
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

@@ -4,10 +4,11 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
 use sphinx_core::analysis::{AnalysisConfig, AnalysisResult};
+use sphinx_core::embed::{EmbedConfig, EmbedOutcome, ExportRow};
 use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
 use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, MetadataRecord, Project};
 use sphinx_core::watch::WatchHandle;
-use sphinx_core::{analysis, db, ingest, metadata};
+use sphinx_core::{analysis, db, embed, ingest, metadata};
 use tauri::{Emitter, Manager};
 
 /// Shared app state: the SQLite connection and the current folder-watch
@@ -349,6 +350,129 @@ fn generate_metadata(
     metadata_response(record)
 }
 
+// --- metadata embedding (SPHIN-4) --------------------------------------------
+
+#[tauri::command]
+fn get_embed_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Option<EmbedConfig>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_embed_config(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_embed_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    config: EmbedConfig,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_embed_config(&conn, project_id, &config).map_err(|e| e.to_string())
+}
+
+fn metadata_from_record(record: &MetadataRecord) -> Result<GeneratedMetadata, String> {
+    let keywords: Vec<String> =
+        serde_json::from_str(&record.keywords_json).map_err(|e| e.to_string())?;
+    Ok(GeneratedMetadata {
+        title: record.title.clone(),
+        description: record.description.clone(),
+        keywords,
+        profile: record.profile.clone(),
+        meets_minimum_keywords: record.meets_minimum_keywords,
+    })
+}
+
+/// Check whether exiftool is reachable at a project's configured path (or on
+/// PATH), returning its version string. SPHIN-20.
+#[tauri::command]
+async fn check_exiftool(
+    state: tauri::State<'_, AppState>,
+    project_id: i64,
+) -> Result<String, String> {
+    let config = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        db::get_embed_config(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    };
+    tauri::async_runtime::spawn_blocking(move || embed::check_exiftool(&config))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Write the asset's latest generated metadata into the file itself as
+/// IPTC/XMP via exiftool, and advance its status to `embedded`. SPHIN-4
+/// (20). Runs on the blocking thread pool since it shells out to a
+/// subprocess.
+#[tauri::command]
+async fn embed_asset_metadata(
+    state: tauri::State<'_, AppState>,
+    project_id: i64,
+    asset_id: i64,
+) -> Result<EmbedOutcome, String> {
+    let (path, meta, config) = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        let asset = db::get_asset(&conn, asset_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("asset {asset_id} not found"))?;
+        let record = db::latest_metadata_for_asset(&conn, asset_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "metadata has not been generated yet".to_string())?;
+        let meta = metadata_from_record(&record)?;
+        let config = db::get_embed_config(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        (asset.path, meta, config)
+    };
+
+    let outcome =
+        tauri::async_runtime::spawn_blocking(move || embed::embed_metadata(&path, &meta, &config))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_asset_status(&conn, asset_id, "embedded").map_err(|e| e.to_string())?;
+    Ok(outcome)
+}
+
+/// Export generated metadata for a set of assets to a CSV file at
+/// `target_path`, for manual review or as a bulk-upload template for a
+/// stock site (automated SFTP upload is SPHIN-6). SPHIN-21.
+#[tauri::command]
+fn export_metadata_csv(
+    state: tauri::State<AppState>,
+    asset_ids: Vec<i64>,
+    target_path: String,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let mut assets = Vec::new();
+    let mut metas = Vec::new();
+    for id in &asset_ids {
+        let asset = db::get_asset(&conn, *id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("asset {id} not found"))?;
+        let record = db::latest_metadata_for_asset(&conn, *id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("asset {id} has no generated metadata"))?;
+        metas.push(metadata_from_record(&record)?);
+        assets.push(asset);
+    }
+
+    let rows: Vec<ExportRow> = assets
+        .iter()
+        .zip(metas.iter())
+        .map(|(asset, meta)| ExportRow {
+            file_name: asset.path.rsplit(['\\', '/']).next().unwrap_or(&asset.path),
+            metadata: meta,
+        })
+        .collect();
+
+    std::fs::write(&target_path, embed::export_csv(&rows)).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -384,6 +508,11 @@ pub fn run() {
             set_limiter_profile,
             get_metadata,
             generate_metadata,
+            get_embed_config,
+            set_embed_config,
+            check_exiftool,
+            embed_asset_metadata,
+            export_metadata_csv,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,6 +4,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::analysis::AnalysisConfig;
+use crate::embed::EmbedConfig;
 use crate::error::Result;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
 use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project};
@@ -17,6 +18,10 @@ const ANALYSIS_CONFIG_KEY: &str = "analysis_config";
 /// Key under which the per-project limiter profile JSON is stored in
 /// `project_settings` (SPHIN-19).
 const LIMITER_PROFILE_KEY: &str = "limiter_profile";
+
+/// Key under which the per-project embed config JSON is stored in
+/// `project_settings` (SPHIN-20).
+const EMBED_CONFIG_KEY: &str = "embed_config";
 
 /// Open (creating if needed) the SQLite database at `path` and run migrations.
 pub fn open(path: impl AsRef<Path>) -> Result<Connection> {
@@ -473,6 +478,21 @@ pub fn set_limiter_profile(
     set_project_setting(conn, project_id, LIMITER_PROFILE_KEY, &json)
 }
 
+/// The per-project embed (exiftool) configuration (SPHIN-20), or `None` if
+/// the project has never had one saved (callers should fall back to
+/// [`EmbedConfig::default`]).
+pub fn get_embed_config(conn: &Connection, project_id: i64) -> Result<Option<EmbedConfig>> {
+    match get_project_setting(conn, project_id, EMBED_CONFIG_KEY)? {
+        Some(json) => Ok(Some(serde_json::from_str(&json)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn set_embed_config(conn: &Connection, project_id: i64, config: &EmbedConfig) -> Result<()> {
+    let json = serde_json::to_string(config)?;
+    set_project_setting(conn, project_id, EMBED_CONFIG_KEY, &json)
+}
+
 // --- metadata (SPHIN-3) ------------------------------------------------------
 
 pub fn insert_metadata(
@@ -702,6 +722,20 @@ mod tests {
 
         let p2 = create_project(&conn, "Nature").unwrap();
         assert!(get_limiter_profile(&conn, p2.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn embed_config_roundtrips_per_project() {
+        let conn = open_in_memory().unwrap();
+        assert!(get_embed_config(&conn, 1).unwrap().is_none());
+
+        let config = EmbedConfig {
+            exiftool_path: "C:\\Tools\\exiftool.exe".into(),
+        };
+        set_embed_config(&conn, 1, &config).unwrap();
+
+        let back = get_embed_config(&conn, 1).unwrap().unwrap();
+        assert_eq!(back.exiftool_path, "C:\\Tools\\exiftool.exe");
     }
 
     #[test]
