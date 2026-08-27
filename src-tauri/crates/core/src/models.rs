@@ -51,6 +51,29 @@ pub struct Job {
     pub updated_at: String,
 }
 
+/// A row in the `projects` table. A project is a working set of assets that
+/// share configuration (AI provider, limiter profile, upload targets). Every
+/// database has a "Default" project (id 1); more can be created later.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: i64,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A row in the `analyses` table: one stored vision-model result for an asset.
+/// `result_json` is the serialized [`crate::analysis::AnalysisResult`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisRecord {
+    pub id: i64,
+    pub asset_id: i64,
+    pub provider: String,
+    pub model: String,
+    pub result_json: String,
+    pub created_at: String,
+}
+
 /// Outcome of attempting to ingest a single path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]

@@ -116,3 +116,142 @@ td.hash {
   color: #888;
   padding: 1.5rem 0;
 }
+
+/* --- SPHIN-2: AI vision config + analysis --- */
+
+.analysis-config {
+  margin: 1.5rem 0;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 10px;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.analysis-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.analysis-config-head h2 {
+  margin: 0.25rem 0;
+}
+
+.config-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.config-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.config-form input,
+.config-form select,
+.config-form textarea {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #666;
+  background: transparent;
+  color: inherit;
+}
+
+.config-form .hint {
+  color: #999;
+  font-weight: normal;
+}
+
+.config-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.analysis-cell {
+  white-space: nowrap;
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0.15rem 0.35rem;
+  color: #4f8cff;
+  cursor: pointer;
+}
+
+.link-btn:disabled {
+  color: #888;
+  cursor: default;
+}
+
+.muted,
+.provenance {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.analysis-detail-row td {
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.analysis-detail {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.5rem 0.25rem;
+}
+
+.analysis-description {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.analysis-detail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.3rem 1rem;
+  margin: 0;
+}
+
+.analysis-detail dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #999;
+}
+
+.analysis-detail dd {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.keyword-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.chip {
+  font-size: 0.78rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+}
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 5px;
+}
+
+.badge-ok {
+  background: rgba(60, 180, 100, 0.18);
+  color: #3cb464;
+}
+
+.badge-warn {
+  background: rgba(230, 160, 40, 0.18);
+  color: #e0a028;
+}

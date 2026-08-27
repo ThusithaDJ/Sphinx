@@ -60,3 +60,84 @@ export function onAssetsIngested(
 ): Promise<UnlistenFn> {
   return listen<IngestSummary>("assets-ingested", (event) => handler(event.payload));
 }
+
+// --- SPHIN-2: media analysis -------------------------------------------------
+
+export interface Project {
+  id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProviderKind = "openai" | "gemini" | "anthropic";
+
+export interface AnalysisConfig {
+  provider: ProviderKind;
+  api_key: string;
+  /** Empty string => provider default model. */
+  model: string;
+  /** Empty string => provider default base URL. */
+  base_url: string;
+  /** Extra guidance appended to the analysis prompt for this project. */
+  prompt_extra: string;
+  timeout_secs: number;
+}
+
+export const DEFAULT_ANALYSIS_CONFIG: AnalysisConfig = {
+  provider: "openai",
+  api_key: "",
+  model: "",
+  base_url: "",
+  prompt_extra: "",
+  timeout_secs: 90,
+};
+
+/** The structured content description a vision model returns (SPHIN-16). */
+export interface AnalysisResult {
+  description: string;
+  subjects: string[];
+  scene: string;
+  mood: string;
+  colors: string[];
+  keywords: string[];
+  editorial: boolean;
+  text_content: string;
+  model: string;
+  provider: string;
+}
+
+export interface AnalysisResponse {
+  record_id: number;
+  result: AnalysisResult;
+}
+
+export function listProjects(): Promise<Project[]> {
+  return invoke("list_projects");
+}
+
+export function createProject(name: string): Promise<Project> {
+  return invoke("create_project", { name });
+}
+
+export function getAnalysisConfig(projectId: number): Promise<AnalysisConfig | null> {
+  return invoke("get_analysis_config", { projectId });
+}
+
+export function setAnalysisConfig(
+  projectId: number,
+  config: AnalysisConfig
+): Promise<void> {
+  return invoke("set_analysis_config", { projectId, config });
+}
+
+export function getAnalysis(assetId: number): Promise<AnalysisResponse | null> {
+  return invoke("get_analysis", { assetId });
+}
+
+export function analyzeAsset(
+  projectId: number,
+  assetId: number
+): Promise<AnalysisResponse> {
+  return invoke("analyze_asset", { projectId, assetId });
+}

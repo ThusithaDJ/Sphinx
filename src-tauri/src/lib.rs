@@ -3,9 +3,10 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use sphinx_core::models::IngestOutcome;
+use sphinx_core::analysis::{AnalysisConfig, AnalysisResult};
+use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Project};
 use sphinx_core::watch::WatchHandle;
-use sphinx_core::{db, ingest};
+use sphinx_core::{analysis, db, ingest};
 use tauri::{Emitter, Manager};
 
 /// Shared app state: the SQLite connection and the current folder-watch
@@ -51,6 +52,8 @@ fn summarize(results: Vec<sphinx_core::Result<IngestOutcome>>) -> IngestSummary 
     summary
 }
 
+// --- ingestion (SPHIN-1) -------------------------------------------------------
+
 /// Ingest an explicit list of file paths (from the native file picker or a
 /// drag-and-drop event). SPHIN-11.
 #[tauri::command]
@@ -73,7 +76,11 @@ fn ingest_folder(state: tauri::State<AppState>, dir: String) -> Result<IngestSum
 /// Start watching a folder for new files, ingesting each one as it appears
 /// and pushing an `assets-ingested` event to the frontend. SPHIN-12.
 #[tauri::command]
-fn start_watch(app: tauri::AppHandle, state: tauri::State<AppState>, dir: String) -> Result<(), String> {
+fn start_watch(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    dir: String,
+) -> Result<(), String> {
     // Stop any previous watch first -- only one active watch folder at a time
     // for now (multi-folder watch can be layered on later without changing
     // this command's shape).
@@ -119,11 +126,7 @@ fn stop_watch(state: tauri::State<AppState>) -> Result<(), String> {
 
 /// List ingested assets, most recent first. SPHIN-14.
 #[tauri::command]
-fn list_assets(
-    state: tauri::State<AppState>,
-    limit: i64,
-    offset: i64,
-) -> Result<Vec<sphinx_core::models::Asset>, String> {
+fn list_assets(state: tauri::State<AppState>, limit: i64, offset: i64) -> Result<Vec<Asset>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::list_assets(&conn, limit, offset).map_err(|e| e.to_string())
 }
@@ -132,6 +135,127 @@ fn list_assets(
 fn asset_count(state: tauri::State<AppState>) -> Result<i64, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::count_assets(&conn).map_err(|e| e.to_string())
+}
+
+// --- projects & analysis config (SPHIN-2 / SPHIN-17) --------------------------
+
+#[tauri::command]
+fn list_projects(state: tauri::State<AppState>) -> Result<Vec<Project>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::list_projects(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_project(state: tauri::State<AppState>, name: String) -> Result<Project, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::create_project(&conn, name.trim()).map_err(|e| e.to_string())
+}
+
+/// The saved vision-provider config for a project, or `null` if never set.
+#[tauri::command]
+fn get_analysis_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Option<AnalysisConfig>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_analysis_config(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_analysis_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    config: AnalysisConfig,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_analysis_config(&conn, project_id, &config).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Serialize)]
+struct AnalysisResponse {
+    record_id: i64,
+    result: AnalysisResult,
+}
+
+/// The latest stored analysis for an asset, parsed back into its structured
+/// form, or `null` if the asset has never been analyzed. SPHIN-2.
+#[tauri::command]
+fn get_analysis(
+    state: tauri::State<AppState>,
+    asset_id: i64,
+) -> Result<Option<AnalysisResponse>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let record: Option<AnalysisRecord> =
+        db::latest_analysis_for_asset(&conn, asset_id).map_err(|e| e.to_string())?;
+    match record {
+        Some(r) => {
+            let result: AnalysisResult =
+                serde_json::from_str(&r.result_json).map_err(|e| e.to_string())?;
+            Ok(Some(AnalysisResponse {
+                record_id: r.id,
+                result,
+            }))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Run the project's configured vision model against one image asset, store the
+/// structured result, and advance the asset to `analyzed`. SPHIN-2 (15/16/17).
+///
+/// The network call is blocking, so it runs on the blocking thread pool; the
+/// DB mutex is only held to read inputs and write results, never across the
+/// call itself.
+#[tauri::command]
+async fn analyze_asset(
+    state: tauri::State<'_, AppState>,
+    project_id: i64,
+    asset_id: i64,
+) -> Result<AnalysisResponse, String> {
+    let (config, asset) = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        let config = db::get_analysis_config(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no analysis provider configured for this project".to_string())?;
+        let asset = db::get_asset(&conn, asset_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("asset {asset_id} not found"))?;
+        (config, asset)
+    };
+
+    if asset.media_type != "image" {
+        return Err("analysis currently supports images only (video is SPHIN-8)".into());
+    }
+
+    let job = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        db::insert_job(&conn, asset_id, "analysis").map_err(|e| e.to_string())?
+    };
+
+    let path = asset.path.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || analysis::analyze_file(&config, &path))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    match outcome {
+        Ok(result) => {
+            let json = serde_json::to_string(&result).map_err(|e| e.to_string())?;
+            let record = db::insert_analysis(&conn, asset_id, &result.provider, &result.model, &json)
+                .map_err(|e| e.to_string())?;
+            db::set_job_status(&conn, job.id, "done", None).map_err(|e| e.to_string())?;
+            db::set_asset_status(&conn, asset_id, "analyzed").map_err(|e| e.to_string())?;
+            Ok(AnalysisResponse {
+                record_id: record.id,
+                result,
+            })
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = db::set_job_status(&conn, job.id, "failed", Some(&msg));
+            Err(msg)
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -158,6 +282,12 @@ pub fn run() {
             stop_watch,
             list_assets,
             asset_count,
+            list_projects,
+            create_project,
+            get_analysis_config,
+            set_analysis_config,
+            get_analysis,
+            analyze_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
