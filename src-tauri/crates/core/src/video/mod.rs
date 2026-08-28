@@ -91,7 +91,7 @@ fn build_keyframe_args(
         video_path.to_string(),
         "-vf".to_string(),
         format!("select='eq(n\\,0)+gt(scene\\,{threshold})'"),
-        "-vsync".to_string(),
+        "-fps_mode".to_string(),
         "vfr".to_string(),
         "-frames:v".to_string(),
         max_frames.to_string(),
@@ -221,6 +221,16 @@ mod tests {
         assert!(args.contains(&"-frames:v".to_string()));
         assert!(args.contains(&"6".to_string()));
         assert_eq!(args.last().unwrap(), "out/frame_%03d.jpg");
+    }
+
+    #[test]
+    fn keyframe_args_use_fps_mode_not_the_removed_vsync_flag() {
+        // -vsync was removed from recent ffmpeg builds in favor of -fps_mode;
+        // using the old flag fails with "Unrecognized option 'vsync'".
+        let args = build_keyframe_args("in.mp4", "out/frame_%03d.jpg", 0.4, 6);
+        assert!(!args.contains(&"-vsync".to_string()));
+        let pos = args.iter().position(|a| a == "-fps_mode").unwrap();
+        assert_eq!(args[pos + 1], "vfr");
     }
 
     #[test]
