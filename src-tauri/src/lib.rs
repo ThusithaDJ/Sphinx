@@ -191,6 +191,42 @@ fn get_analysis_configs(
     db::get_analysis_configs(&conn, project_id).map_err(|e| e.to_string())
 }
 
+/// Check whether a local Ollama server is reachable, returning a short
+/// summary of the models it has pulled. SPHIN-34. Reads the project's saved
+/// "ollama" config if there is one (so the user can check connectivity
+/// before switching the active provider to it), else a fresh default.
+#[tauri::command]
+async fn check_ollama(
+    state: tauri::State<'_, AppState>,
+    project_id: i64,
+) -> Result<String, String> {
+    let config = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        db::get_analysis_configs(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .get("ollama")
+            .cloned()
+            .unwrap_or_else(|| AnalysisConfig::new(analysis::ProviderKind::Ollama))
+    };
+    tauri::async_runtime::spawn_blocking(move || analysis::check_ollama(&config))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Best-effort local GPU capability check (SPHIN-36), surfaced as a warning
+/// in Settings when running local models without a detected GPU.
+#[tauri::command]
+async fn detect_gpu() -> sphinx_core::gpu::GpuInfo {
+    tauri::async_runtime::spawn_blocking(sphinx_core::gpu::detect_gpu)
+        .await
+        .unwrap_or(sphinx_core::gpu::GpuInfo {
+            available: false,
+            backend: "none".to_string(),
+            detail: "detection failed".to_string(),
+        })
+}
+
 #[derive(Debug, Serialize)]
 struct AnalysisResponse {
     record_id: i64,
@@ -1094,6 +1130,8 @@ pub fn run() {
             get_analysis_config,
             set_analysis_config,
             get_analysis_configs,
+            check_ollama,
+            detect_gpu,
             get_analysis,
             analyze_asset,
             get_video_config,

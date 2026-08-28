@@ -15,6 +15,9 @@ pub enum ProviderKind {
     Gemini,
     /// Anthropic Claude messages API.
     Anthropic,
+    /// A local Ollama server running a vision-capable model (LLaVA,
+    /// Qwen2-VL, ...) (SPHIN-34). No API key required by default.
+    Ollama,
 }
 
 impl ProviderKind {
@@ -23,6 +26,7 @@ impl ProviderKind {
             ProviderKind::OpenAi => "openai",
             ProviderKind::Gemini => "gemini",
             ProviderKind::Anthropic => "anthropic",
+            ProviderKind::Ollama => "ollama",
         }
     }
 
@@ -34,6 +38,7 @@ impl ProviderKind {
             ProviderKind::OpenAi => "gpt-4o",
             ProviderKind::Gemini => "gemini-1.5-pro",
             ProviderKind::Anthropic => "claude-3-5-sonnet-latest",
+            ProviderKind::Ollama => "llava",
         }
     }
 
@@ -43,7 +48,15 @@ impl ProviderKind {
             ProviderKind::OpenAi => "https://api.openai.com/v1",
             ProviderKind::Gemini => "https://generativelanguage.googleapis.com/v1beta",
             ProviderKind::Anthropic => "https://api.anthropic.com/v1",
+            ProviderKind::Ollama => "http://localhost:11434",
         }
+    }
+
+    /// Whether this provider needs an API key to be usable. Only false for
+    /// [`ProviderKind::Ollama`], which talks to a local, unauthenticated
+    /// server by default.
+    pub fn requires_api_key(&self) -> bool {
+        !matches!(self, ProviderKind::Ollama)
     }
 }
 
@@ -135,6 +148,14 @@ mod tests {
         cfg.base_url = "https://proxy.internal/v1/".into();
         assert_eq!(cfg.model_or_default(), "gpt-5");
         assert_eq!(cfg.base_url_or_default(), "https://proxy.internal/v1");
+    }
+
+    #[test]
+    fn only_ollama_skips_the_api_key_requirement() {
+        assert!(!ProviderKind::Ollama.requires_api_key());
+        assert!(ProviderKind::OpenAi.requires_api_key());
+        assert!(ProviderKind::Gemini.requires_api_key());
+        assert!(ProviderKind::Anthropic.requires_api_key());
     }
 
     #[test]

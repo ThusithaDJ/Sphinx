@@ -12,8 +12,11 @@ mod anthropic;
 pub mod config;
 mod gemini;
 mod http;
+mod ollama;
 mod openai;
 pub mod prompt;
+
+pub use ollama::check_ollama;
 
 use std::path::Path;
 
@@ -149,7 +152,7 @@ pub trait VisionProvider {
 /// Build the configured provider. Fails fast if the config has no API key,
 /// so callers get a clear "not configured" error before any network call.
 pub fn provider_for(config: &AnalysisConfig) -> Result<Box<dyn VisionProvider>> {
-    if config.api_key.trim().is_empty() {
+    if config.provider.requires_api_key() && config.api_key.trim().is_empty() {
         return Err(CoreError::Config(format!(
             "{} provider selected but no API key set",
             config.provider.as_str()
@@ -161,6 +164,7 @@ pub fn provider_for(config: &AnalysisConfig) -> Result<Box<dyn VisionProvider>> 
         }
         ProviderKind::Gemini => Box::new(gemini::GeminiProvider::new(config)?),
         ProviderKind::Anthropic => Box::new(anthropic::AnthropicProvider::new(config)?),
+        ProviderKind::Ollama => Box::new(ollama::OllamaProvider::new(config)?),
     })
 }
 
@@ -360,5 +364,11 @@ mod tests {
     fn provider_for_requires_an_api_key() {
         let cfg = AnalysisConfig::new(ProviderKind::OpenAi);
         assert!(matches!(provider_for(&cfg), Err(CoreError::Config(_))));
+    }
+
+    #[test]
+    fn provider_for_ollama_needs_no_api_key() {
+        let cfg = AnalysisConfig::new(ProviderKind::Ollama);
+        assert!(provider_for(&cfg).is_ok());
     }
 }

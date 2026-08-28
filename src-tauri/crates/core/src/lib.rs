@@ -18,11 +18,14 @@
 //!   the OS credential store via [`secrets`], never in `sphinx.db`).
 //! - [`video`], [`transcribe`] — SPHIN-8, keyframe/audio extraction and
 //!   transcription feeding [`analysis`]'s video-specific prompting.
+//! - [`gpu`] — SPHIN-9, local-hardware capability check backing the Ollama
+//!   provider in [`analysis`] (SPHIN-34).
 
 pub mod analysis;
 pub mod db;
 pub mod embed;
 pub mod error;
+pub mod gpu;
 pub mod hash;
 pub mod ingest;
 pub mod keywords;

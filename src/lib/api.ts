@@ -70,7 +70,7 @@ export interface Project {
   updated_at: string;
 }
 
-export type ProviderKind = "openai" | "gemini" | "anthropic";
+export type ProviderKind = "openai" | "gemini" | "anthropic" | "ollama";
 
 export interface AnalysisConfig {
   provider: ProviderKind;
@@ -136,6 +136,22 @@ export function getAnalysisConfigs(
   projectId: number
 ): Promise<Record<string, AnalysisConfig>> {
   return invoke("get_analysis_configs", { projectId });
+}
+
+/** Resolves to a summary of models pulled on the local Ollama server, or rejects if it isn't reachable. */
+export function checkOllama(projectId: number): Promise<string> {
+  return invoke("check_ollama", { projectId });
+}
+
+/** Best-effort local GPU capability check (SPHIN-36); never rejects. */
+export interface GpuInfo {
+  available: boolean;
+  backend: string;
+  detail: string;
+}
+
+export function detectGpu(): Promise<GpuInfo> {
+  return invoke("detect_gpu");
 }
 
 export function getAnalysis(assetId: number): Promise<AnalysisResponse | null> {

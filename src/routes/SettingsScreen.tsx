@@ -13,6 +13,7 @@ const SIDEBAR_ITEMS = [
 
 export function SettingsScreen() {
   const app = useApp();
+  const isOllama = app.analysisConfig.provider === "ollama";
   const [active, setActive] = useState("ai-provider");
   const contentRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -111,27 +112,29 @@ export function SettingsScreen() {
                 <input
                   value={app.analysisConfig.model}
                   onChange={(e) => app.patchAnalysisConfig({ model: e.target.value })}
-                  placeholder="e.g. gpt-4o"
+                  placeholder={isOllama ? "e.g. llava, qwen2-vl" : "e.g. gpt-4o"}
                 />
               </div>
               <div className="field">
-                <span className="field-label">API key</span>
+                <span className="field-label">
+                  API key {isOllama && <span className="hint">(optional — only for a proxied/authenticated server)</span>}
+                </span>
                 <input
                   type="password"
                   autoComplete="off"
                   value={app.analysisConfig.api_key}
                   onChange={(e) => app.patchAnalysisConfig({ api_key: e.target.value })}
-                  placeholder="sk-live-…"
+                  placeholder={isOllama ? "leave blank for a local server" : "sk-live-…"}
                 />
               </div>
               <div className="field">
                 <span className="field-label">
-                  API base URL <span className="hint">(blank = provider default)</span>
+                  {isOllama ? "Server URL" : "API base URL"} <span className="hint">(blank = provider default)</span>
                 </span>
                 <input
                   value={app.analysisConfig.base_url}
                   onChange={(e) => app.patchAnalysisConfig({ base_url: e.target.value })}
-                  placeholder="proxy / gateway override"
+                  placeholder={isOllama ? "http://localhost:11434" : "proxy / gateway override"}
                 />
               </div>
             </div>
@@ -143,9 +146,26 @@ export function SettingsScreen() {
                 Test request
               </button>
             </div>
-            <p className="settings-footer-note">
-              Key is stored locally in sphinx.db and never leaves this machine except to the provider.
-            </p>
+            {isOllama ? (
+              <>
+                <p className="settings-footer-note">
+                  {app.ollama.checking
+                    ? "Checking the local Ollama server…"
+                    : app.ollama.ok
+                    ? `Ollama reachable — ${app.ollama.detail}`
+                    : `Ollama not reachable at this server URL — ${app.ollama.detail}`}
+                </p>
+                {app.gpu && !app.gpu.available && (
+                  <p className="settings-footer-note" style={{ color: "var(--warn-ink)" }}>
+                    {app.gpu.detail}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="settings-footer-note">
+                Key is stored locally in sphinx.db and never leaves this machine except to the provider.
+              </p>
+            )}
           </div>
 
           <div
@@ -233,6 +253,18 @@ export function SettingsScreen() {
               <button className="btn-secondary" style={{ color: "var(--accent)" }} onClick={() => void pickFfmpeg()}>
                 Locate…
               </button>
+            </div>
+            <div className="tool-row">
+              <span
+                className="tool-status-dot"
+                style={{ background: !app.gpu ? "var(--off)" : app.gpu.available ? "var(--ok)" : "var(--warn)" }}
+              />
+              <div className="tool-row-body">
+                <span className="tool-name">
+                  GPU <span style={{ fontSize: 11.5, color: "var(--warn-ink)", fontWeight: 400 }}>speeds up local models</span>
+                </span>
+                <span className="tool-detail">{app.gpu?.detail ?? "checking…"}</span>
+              </div>
             </div>
             <div className="tool-row">
               <span className="tool-status-dot" style={{ background: "var(--ok)" }} />

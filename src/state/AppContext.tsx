@@ -16,6 +16,7 @@ import {
   type Asset,
   type EmbedConfig,
   type GeneratedMetadata,
+  type GpuInfo,
   type IngestSummary,
   type Job,
   type JobCounts,
@@ -36,8 +37,10 @@ import {
   assetCount,
   checkExiftool,
   checkFfmpeg,
+  checkOllama,
   createSftpProfile,
   deleteSftpProfile,
+  detectGpu,
   embedAssetMetadata,
   enqueueBatch,
   enrichKeywords,
@@ -87,6 +90,7 @@ export const PROVIDER_LABELS: Record<ProviderKind, string> = {
   openai: "OpenAI (GPT-4o)",
   gemini: "Google Gemini",
   anthropic: "Anthropic Claude",
+  ollama: "Ollama (local)",
 };
 
 export function extensionOf(path: string): string {
@@ -208,6 +212,10 @@ function useSphinxApp() {
   const [analyses, setAnalyses] = useState<Record<number, AnalysisResult>>({});
   const [analyzing, setAnalyzing] = useState<Record<number, boolean>>({});
   const [analyzeErrors, setAnalyzeErrors] = useState<Record<number, string>>({});
+
+  // --- local AI model support (SPHIN-9) ---
+  const [ollama, setOllama] = useState<ToolStatus>(CHECKING);
+  const [gpu, setGpu] = useState<GpuInfo | null>(null);
 
   // --- metadata generation & limiter profiles (SPHIN-3 / SPHIN-19) ---
   const [limiterPresets, setLimiterPresets] = useState<LimiterProfile[]>([]);
@@ -352,6 +360,26 @@ function useSphinxApp() {
       .catch(() => void runFfmpegCheck());
   }, [runFfmpegCheck]);
 
+  const runOllamaCheck = useCallback(async () => {
+    setOllama(CHECKING);
+    try {
+      const detail = await checkOllama(PROJECT_ID);
+      setOllama({ checking: false, ok: true, detail });
+    } catch (err) {
+      setOllama({ checking: false, ok: false, detail: String(err) });
+    }
+  }, []);
+
+  useEffect(() => {
+    void runOllamaCheck();
+  }, [runOllamaCheck]);
+
+  useEffect(() => {
+    detectGpu()
+      .then(setGpu)
+      .catch(() => setGpu({ available: false, backend: "none", detail: "detection failed" }));
+  }, []);
+
   useEffect(() => {
     getKeywordConfig(PROJECT_ID)
       .then((saved) => setKeywordConfigState(saved ?? DEFAULT_KEYWORD_CONFIG))
@@ -409,7 +437,10 @@ function useSphinxApp() {
     return () => unlisten?.();
   }, [refresh]);
 
-  const hasKey = Boolean(activeAnalysisConfig && activeAnalysisConfig.api_key.trim().length > 0);
+  const hasKey = Boolean(
+    activeAnalysisConfig &&
+      (activeAnalysisConfig.provider === "ollama" || activeAnalysisConfig.api_key.trim().length > 0)
+  );
   const hasKeywordProvider = Boolean(keywordConfig.shutterstock || keywordConfig.adobe_stock);
 
   // --- ingest ---
@@ -559,6 +590,7 @@ function useSphinxApp() {
       setActiveAnalysisConfig(analysisConfig);
       setSavedAnalysisConfigs((prev) => ({ ...prev, [analysisConfig.provider]: analysisConfig }));
       setStatus(`Saved ${PROVIDER_LABELS[analysisConfig.provider]} configuration.`);
+      if (analysisConfig.provider === "ollama") void runOllamaCheck();
     } catch (err) {
       setStatus(`Could not save configuration: ${String(err)}`);
     }
@@ -845,6 +877,8 @@ function useSphinxApp() {
     switchAnalysisProvider,
     saveAnalysisConfig,
     handleAnalyze,
+    ollama,
+    gpu,
 
     limiterPresets,
     activeProfile,
