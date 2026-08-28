@@ -1485,7 +1485,8 @@ textarea:focus {
   overflow: hidden;
 }
 
-.review-thumb img {
+.review-thumb img,
+.review-thumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1535,6 +1536,13 @@ textarea:focus {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.review-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #111;
 }
 
 .review-caption {

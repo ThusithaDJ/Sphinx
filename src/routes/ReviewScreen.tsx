@@ -134,6 +134,9 @@ export function ReviewScreen() {
               >
                 <div className="review-thumb">
                   {a?.media_type === "image" && <img src={convertFileSrc(a.path)} alt="" />}
+                  {a?.media_type === "video" && (
+                    <video src={`${convertFileSrc(a.path)}#t=0.1`} muted preload="metadata" />
+                  )}
                 </div>
                 {decision === "approved" && <span className="review-status-disc review-status-disc--approved">✓</span>}
                 {i === cursor && !decision && <span className="review-status-disc review-status-disc--current">•</span>}
@@ -154,6 +157,9 @@ export function ReviewScreen() {
           <div className="review-center">
             <div className="review-preview">
               {asset.media_type === "image" && <img src={convertFileSrc(asset.path)} alt="" />}
+              {asset.media_type === "video" && (
+                <video src={convertFileSrc(asset.path)} controls preload="metadata" />
+              )}
               <span className="review-caption">
                 {asset.path.split(/[\\/]/).pop()} · {analysisSize(asset)} · {app.analyses[asset.id]?.model ?? "—"}
               </span>

@@ -98,6 +98,14 @@ export function QueueScreen() {
                   >
                     <div className="job-thumb">
                       {asset?.media_type === "image" && <img src={convertFileSrc(asset.path)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 5 }} />}
+                      {asset?.media_type === "video" && (
+                        <video
+                          src={`${convertFileSrc(asset.path)}#t=0.1`}
+                          muted
+                          preload="metadata"
+                          style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 5 }}
+                        />
+                      )}
                     </div>
                     <div className="job-info">
                       <div className="job-name" title={asset?.path}>
