@@ -10,9 +10,11 @@ use sphinx_core::keywords::{AdobeStockProvider, KeywordConfig, KeywordProvider, 
 use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
 use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Job, MetadataRecord, Project, SftpProfileRecord};
 use sphinx_core::secrets;
+use sphinx_core::transcribe::TranscriptionConfig;
 use sphinx_core::upload::{SftpProfile, SftpSite};
+use sphinx_core::video::VideoConfig;
 use sphinx_core::watch::WatchHandle;
-use sphinx_core::{analysis, db, embed, ingest, metadata, upload};
+use sphinx_core::{analysis, db, embed, ingest, metadata, upload, video};
 use tauri::{Emitter, Manager};
 
 /// Shared app state: the SQLite connection and the current folder-watch
@@ -206,19 +208,23 @@ fn get_analysis(
     }
 }
 
-/// Run the project's configured vision model against one image asset, store the
-/// structured result, and advance the asset to `analyzed`. SPHIN-2 (15/16/17).
+/// Run the project's configured vision model against one asset (image or
+/// video), store the structured result, and advance the asset to
+/// `analyzed`. SPHIN-2 (15/16/17) for images; SPHIN-8 (31/32/33) for video --
+/// keyframes are sampled via ffmpeg and, if transcription is enabled, an
+/// audio transcript is appended, before a single request to the same vision
+/// provider images use.
 ///
-/// The network call is blocking, so it runs on the blocking thread pool; the
-/// DB mutex is only held to read inputs and write results, never across the
-/// call itself.
+/// The network call (and, for video, ffmpeg/transcription) is blocking, so it
+/// runs on the blocking thread pool; the DB mutex is only held to read inputs
+/// and write results, never across the call itself.
 #[tauri::command]
 async fn analyze_asset(
     state: tauri::State<'_, AppState>,
     project_id: i64,
     asset_id: i64,
 ) -> Result<AnalysisResponse, String> {
-    let (config, asset) = {
+    let (config, asset, video_config, transcription_config) = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         let config = db::get_analysis_config(&conn, project_id)
             .map_err(|e| e.to_string())?
@@ -226,12 +232,13 @@ async fn analyze_asset(
         let asset = db::get_asset(&conn, asset_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("asset {asset_id} not found"))?;
-        (config, asset)
+        let video_config = db::get_video_config(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        let transcription_config = db::get_transcription_config(&conn, project_id)
+            .map_err(|e| e.to_string())?;
+        (config, asset, video_config, transcription_config)
     };
-
-    if asset.media_type != "image" {
-        return Err("analysis currently supports images only (video is SPHIN-8)".into());
-    }
 
     let job = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -239,9 +246,16 @@ async fn analyze_asset(
     };
 
     let path = asset.path.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || analysis::analyze_file(&config, &path))
-        .await
-        .map_err(|e| e.to_string())?;
+    let is_image = asset.media_type == "image";
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        if is_image {
+            analysis::analyze_file(&config, &path)
+        } else {
+            analysis::analyze_video_file(&config, &video_config, transcription_config.as_ref(), &path)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     match outcome {
@@ -262,6 +276,65 @@ async fn analyze_asset(
             Err(msg)
         }
     }
+}
+
+// --- video pipeline (SPHIN-8) -------------------------------------------------
+
+#[tauri::command]
+fn get_video_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Option<VideoConfig>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_video_config(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_video_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    config: VideoConfig,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_video_config(&conn, project_id, &config).map_err(|e| e.to_string())
+}
+
+/// Check whether ffmpeg is reachable at a project's configured path (or on
+/// PATH), returning its version string. SPHIN-31.
+#[tauri::command]
+async fn check_ffmpeg(
+    state: tauri::State<'_, AppState>,
+    project_id: i64,
+) -> Result<String, String> {
+    let config = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        db::get_video_config(&conn, project_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    };
+    tauri::async_runtime::spawn_blocking(move || video::check_ffmpeg(&config))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_transcription_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Option<TranscriptionConfig>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_transcription_config(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_transcription_config(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    config: TranscriptionConfig,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_transcription_config(&conn, project_id, &config).map_err(|e| e.to_string())
 }
 
 // --- metadata generation & limiter profiles (SPHIN-3) ------------------------
@@ -995,6 +1068,11 @@ pub fn run() {
             set_analysis_config,
             get_analysis,
             analyze_asset,
+            get_video_config,
+            set_video_config,
+            check_ffmpeg,
+            get_transcription_config,
+            set_transcription_config,
             list_limiter_profiles,
             get_limiter_profile,
             set_limiter_profile,

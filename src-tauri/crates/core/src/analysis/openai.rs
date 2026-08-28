@@ -13,7 +13,7 @@ pub struct OpenAiProvider {
     api_key: String,
     model: String,
     base_url: String,
-    instruction: String,
+    prompt_extra: String,
 }
 
 impl OpenAiProvider {
@@ -23,7 +23,7 @@ impl OpenAiProvider {
             api_key: config.api_key.clone(),
             model: config.model_or_default(),
             base_url: config.base_url_or_default(),
-            instruction: prompt::build_instruction(&config.prompt_extra),
+            prompt_extra: config.prompt_extra.clone(),
         })
     }
 
@@ -31,32 +31,32 @@ impl OpenAiProvider {
         format!("{}/chat/completions", self.base_url)
     }
 
-    /// The request body. Pure so it can be asserted on without a network call.
-    fn build_body(&self, image: &ImageInput) -> Value {
+    /// The request body for one or more images sharing a single instruction.
+    /// Pure so it can be asserted on without a network call.
+    fn build_body(&self, system: &str, instruction: &str, images: &[ImageInput]) -> Value {
+        let mut content = vec![json!({ "type": "text", "text": instruction })];
+        for image in images {
+            content.push(json!({ "type": "image_url", "image_url": { "url": image.data_url() } }));
+        }
         json!({
             "model": self.model,
             "temperature": 0.2,
             "response_format": { "type": "json_object" },
             "messages": [
-                { "role": "system", "content": prompt::SYSTEM },
-                { "role": "user", "content": [
-                    { "type": "text", "text": self.instruction },
-                    { "type": "image_url", "image_url": { "url": image.data_url() } }
-                ]}
+                { "role": "system", "content": system },
+                { "role": "user", "content": content }
             ]
         })
     }
-}
 
-impl VisionProvider for OpenAiProvider {
-    fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult> {
+    fn send(&self, body: &Value) -> Result<AnalysisResult> {
         let auth = format!("Bearer {}", self.api_key);
         let resp = http::post_json(
             &self.client,
             self.name(),
             &self.endpoint(),
             &[("authorization", auth.as_str())],
-            &self.build_body(image),
+            body,
         )?;
         let content = http::dig_str(
             self.name(),
@@ -64,6 +64,20 @@ impl VisionProvider for OpenAiProvider {
             &["choices", "0", "message", "content"],
         )?;
         parse_analysis_json(self.name(), &self.model, content)
+    }
+}
+
+impl VisionProvider for OpenAiProvider {
+    fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult> {
+        let instruction = prompt::build_instruction(&self.prompt_extra);
+        let body = self.build_body(prompt::SYSTEM, &instruction, std::slice::from_ref(image));
+        self.send(&body)
+    }
+
+    fn analyze_video(&self, frames: &[ImageInput], transcript: Option<&str>) -> Result<AnalysisResult> {
+        let instruction = prompt::build_video_instruction(&self.prompt_extra, frames.len(), transcript);
+        let body = self.build_body(prompt::VIDEO_SYSTEM, &instruction, frames);
+        self.send(&body)
     }
 
     fn name(&self) -> &'static str {
@@ -92,15 +106,30 @@ mod tests {
             bytes: b"x".to_vec(),
             mime: "image/png".into(),
         };
-        let body = provider().build_body(&img);
+        let body = provider().build_body(prompt::SYSTEM, "instruction", &[img]);
         assert_eq!(body["model"], "gpt-4o");
         assert_eq!(body["response_format"]["type"], "json_object");
+        assert_eq!(body["messages"][0]["content"], prompt::SYSTEM);
         let parts = &body["messages"][1]["content"];
         assert_eq!(parts[0]["type"], "text");
         assert_eq!(
             parts[1]["image_url"]["url"],
             "data:image/png;base64,eA=="
         );
+    }
+
+    #[test]
+    fn video_body_carries_every_frame_and_the_video_system_message() {
+        let frames = vec![
+            ImageInput { bytes: b"a".to_vec(), mime: "image/jpeg".into() },
+            ImageInput { bytes: b"b".to_vec(), mime: "image/jpeg".into() },
+        ];
+        let body = provider().build_body(prompt::VIDEO_SYSTEM, "instruction", &frames);
+        assert_eq!(body["messages"][0]["content"], prompt::VIDEO_SYSTEM);
+        let parts = &body["messages"][1]["content"];
+        assert_eq!(parts.as_array().unwrap().len(), 3); // text + 2 frames
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/jpeg;base64,YQ==");
+        assert_eq!(parts[2]["image_url"]["url"], "data:image/jpeg;base64,Yg==");
     }
 
     #[test]

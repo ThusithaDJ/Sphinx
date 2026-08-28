@@ -17,12 +17,17 @@ import {
   type QueueJobType,
   type SftpProfile,
   type SftpSite,
+  type TranscriptionConfig,
+  type VideoConfig,
   DEFAULT_ANALYSIS_CONFIG,
   DEFAULT_EMBED_CONFIG,
   DEFAULT_KEYWORD_CONFIG,
+  DEFAULT_TRANSCRIPTION_CONFIG,
+  DEFAULT_VIDEO_CONFIG,
   analyzeAsset,
   assetCount,
   checkExiftool,
+  checkFfmpeg,
   createSftpProfile,
   deleteSftpProfile,
   embedAssetMetadata,
@@ -36,6 +41,8 @@ import {
   getKeywordConfig,
   getLimiterProfile,
   getMetadata,
+  getTranscriptionConfig,
+  getVideoConfig,
   ingestFiles,
   ingestFolder,
   listAssets,
@@ -50,6 +57,8 @@ import {
   setEmbedConfig,
   setKeywordConfig,
   setLimiterProfile,
+  setTranscriptionConfig,
+  setVideoConfig,
   startWatch,
   stopWatch,
   uploadAsset,
@@ -142,6 +151,15 @@ export default function App() {
   const [showEmbedConfig, setShowEmbedConfig] = useState(false);
   const [exiftoolStatus, setExiftoolStatus] = useState<string>("checking…");
   const [embedding, setEmbedding] = useState<Record<number, boolean>>({});
+
+  // --- SPHIN-8 video pipeline state (keyframes + optional transcription) ---
+  const [videoConfig, setVideoConfigState] = useState<VideoConfig>(DEFAULT_VIDEO_CONFIG);
+  const [transcriptionConfig, setTranscriptionConfigState] =
+    useState<TranscriptionConfig>(DEFAULT_TRANSCRIPTION_CONFIG);
+  const [videoConfigReady, setVideoConfigReady] = useState(false);
+  const [videoConfigDirty, setVideoConfigDirty] = useState(false);
+  const [showVideoConfig, setShowVideoConfig] = useState(false);
+  const [ffmpegStatus, setFfmpegStatus] = useState<string>("checking…");
 
   // --- SPHIN-5 keyword enrichment state ---
   const [keywordConfig, setKeywordConfigState] = useState<KeywordConfig>(DEFAULT_KEYWORD_CONFIG);
@@ -240,6 +258,27 @@ export default function App() {
       })
       .catch(() => setEmbedConfigReady(true));
   }, [runExiftoolCheck]);
+
+  const runFfmpegCheck = useCallback(async () => {
+    setFfmpegStatus("checking…");
+    try {
+      const version = await checkFfmpeg(PROJECT_ID);
+      setFfmpegStatus(`found (${version})`);
+    } catch (err) {
+      setFfmpegStatus(`not found: ${String(err)}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    Promise.all([getVideoConfig(PROJECT_ID), getTranscriptionConfig(PROJECT_ID)])
+      .then(([savedVideo, savedTranscription]) => {
+        setVideoConfigState(savedVideo ?? DEFAULT_VIDEO_CONFIG);
+        setTranscriptionConfigState(savedTranscription ?? DEFAULT_TRANSCRIPTION_CONFIG);
+        setVideoConfigReady(true);
+        void runFfmpegCheck();
+      })
+      .catch(() => setVideoConfigReady(true));
+  }, [runFfmpegCheck]);
 
   const refreshSftpProfiles = useCallback(async () => {
     const rows = await listSftpProfiles(PROJECT_ID);
@@ -490,6 +529,30 @@ export default function App() {
     }
   }
 
+  function patchVideoConfig(patch: Partial<VideoConfig>) {
+    setVideoConfigState((prev) => ({ ...prev, ...patch }));
+    setVideoConfigDirty(true);
+  }
+
+  function patchTranscriptionConfig(patch: Partial<TranscriptionConfig>) {
+    setTranscriptionConfigState((prev) => ({ ...prev, ...patch }));
+    setVideoConfigDirty(true);
+  }
+
+  async function handleSaveVideoConfig() {
+    try {
+      await Promise.all([
+        setVideoConfig(PROJECT_ID, videoConfig),
+        setTranscriptionConfig(PROJECT_ID, transcriptionConfig),
+      ]);
+      setVideoConfigDirty(false);
+      setStatus("Saved video pipeline configuration.");
+      await runFfmpegCheck();
+    } catch (err) {
+      setStatus(`Could not save video configuration: ${String(err)}`);
+    }
+  }
+
   async function handleExportCsv() {
     const assetIds = assets.filter((a) => generated[a.id]).map((a) => a.id);
     if (assetIds.length === 0) {
@@ -621,8 +684,8 @@ export default function App() {
         return assets.filter(
           (a) =>
             hasKey &&
-            a.media_type === "image" &&
-            ANALYZABLE_EXTENSIONS.includes(extensionOf(a.path)) &&
+            ((a.media_type === "image" && ANALYZABLE_EXTENSIONS.includes(extensionOf(a.path))) ||
+              a.media_type === "video") &&
             !analyses[a.id]
         );
       case "generate_metadata":
@@ -689,7 +752,7 @@ export default function App() {
         <p className="subtitle">
           Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3) ·
           Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5) · Job orchestration (SPHIN-7) ·
-          Upload & distribution (SPHIN-6)
+          Upload & distribution (SPHIN-6) · Video pipeline (SPHIN-8)
         </p>
       </header>
 
@@ -893,6 +956,97 @@ export default function App() {
                 Save
               </button>
               <button onClick={() => runExiftoolCheck()}>Re-check</button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="analysis-config">
+        <div className="analysis-config-head">
+          <h2>
+            Video pipeline{" "}
+            <span className="count">
+              · ffmpeg {videoConfigReady ? ffmpegStatus : "loading…"}
+            </span>
+          </h2>
+          <button onClick={() => setShowVideoConfig((v) => !v)}>
+            {showVideoConfig ? "Hide" : "Configure"}
+          </button>
+        </div>
+
+        {showVideoConfig && (
+          <div className="config-form">
+            <label>
+              ffmpeg path <span className="hint">(blank = look up on PATH)</span>
+              <input
+                type="text"
+                placeholder="e.g. C:\Tools\ffmpeg.exe"
+                value={videoConfig.ffmpeg_path}
+                onChange={(e) => patchVideoConfig({ ffmpeg_path: e.target.value })}
+              />
+            </label>
+            <label>
+              Max keyframes per video
+              <input
+                type="number"
+                min={1}
+                value={videoConfig.max_keyframes}
+                onChange={(e) => patchVideoConfig({ max_keyframes: Number(e.target.value) || 1 })}
+              />
+            </label>
+            <label>
+              Scene-change threshold <span className="hint">(0.0-1.0, lower = more frames)</span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={videoConfig.scene_threshold}
+                onChange={(e) => patchVideoConfig({ scene_threshold: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={transcriptionConfig.enabled}
+                onChange={(e) => patchTranscriptionConfig({ enabled: e.target.checked })}
+              />{" "}
+              Transcribe audio (Whisper API) and include it in the analysis prompt
+            </label>
+            {transcriptionConfig.enabled && (
+              <>
+                <label>
+                  Whisper API key
+                  <input
+                    type="password"
+                    value={transcriptionConfig.api_key}
+                    onChange={(e) => patchTranscriptionConfig({ api_key: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Base URL <span className="hint">(blank = api.openai.com)</span>
+                  <input
+                    type="text"
+                    placeholder="https://api.openai.com/v1"
+                    value={transcriptionConfig.base_url}
+                    onChange={(e) => patchTranscriptionConfig({ base_url: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Model
+                  <input
+                    type="text"
+                    value={transcriptionConfig.model}
+                    onChange={(e) => patchTranscriptionConfig({ model: e.target.value })}
+                  />
+                </label>
+              </>
+            )}
+            <div className="config-actions">
+              <button onClick={handleSaveVideoConfig} disabled={!videoConfigDirty} className="btn-active">
+                Save
+              </button>
+              <button onClick={() => runFfmpegCheck()}>Re-check</button>
             </div>
           </div>
         )}
@@ -1167,8 +1321,12 @@ export default function App() {
               const result = analyses[asset.id];
               const meta = generated[asset.id];
               const isImage = asset.media_type === "image";
+              const isVideo = asset.media_type === "video";
+              // All ingested videos are already restricted to ffmpeg-supported
+              // containers (see VIDEO_EXTENSIONS), so no extra whitelist is
+              // needed for them the way ANALYZABLE_EXTENSIONS narrows images.
               const analyzable =
-                isImage && ANALYZABLE_EXTENSIONS.includes(extensionOf(asset.path));
+                (isImage && ANALYZABLE_EXTENSIONS.includes(extensionOf(asset.path))) || isVideo;
               return (
                 <Fragment key={asset.id}>
                   <tr>

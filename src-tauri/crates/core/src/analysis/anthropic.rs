@@ -18,7 +18,7 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     base_url: String,
-    instruction: String,
+    prompt_extra: String,
 }
 
 impl AnthropicProvider {
@@ -28,7 +28,7 @@ impl AnthropicProvider {
             api_key: config.api_key.clone(),
             model: config.model_or_default(),
             base_url: config.base_url_or_default(),
-            instruction: prompt::build_instruction(&config.prompt_extra),
+            prompt_extra: config.prompt_extra.clone(),
         })
     }
 
@@ -36,28 +36,28 @@ impl AnthropicProvider {
         format!("{}/messages", self.base_url)
     }
 
-    fn build_body(&self, image: &ImageInput) -> Value {
+    fn build_body(&self, system: &str, instruction: &str, images: &[ImageInput]) -> Value {
+        let mut content: Vec<Value> = images
+            .iter()
+            .map(|image| {
+                json!({ "type": "image", "source": {
+                    "type": "base64",
+                    "media_type": image.mime,
+                    "data": image.base64()
+                }})
+            })
+            .collect();
+        content.push(json!({ "type": "text", "text": instruction }));
         json!({
             "model": self.model,
             "max_tokens": 1024,
             "temperature": 0.2,
-            "system": prompt::SYSTEM,
-            "messages": [
-                { "role": "user", "content": [
-                    { "type": "image", "source": {
-                        "type": "base64",
-                        "media_type": image.mime,
-                        "data": image.base64()
-                    }},
-                    { "type": "text", "text": self.instruction }
-                ]}
-            ]
+            "system": system,
+            "messages": [ { "role": "user", "content": content } ]
         })
     }
-}
 
-impl VisionProvider for AnthropicProvider {
-    fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult> {
+    fn send(&self, body: &Value) -> Result<AnalysisResult> {
         let resp = http::post_json(
             &self.client,
             self.name(),
@@ -66,10 +66,24 @@ impl VisionProvider for AnthropicProvider {
                 ("x-api-key", self.api_key.as_str()),
                 ("anthropic-version", API_VERSION),
             ],
-            &self.build_body(image),
+            body,
         )?;
         let content = http::dig_str(self.name(), &resp, &["content", "0", "text"])?;
         parse_analysis_json(self.name(), &self.model, content)
+    }
+}
+
+impl VisionProvider for AnthropicProvider {
+    fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult> {
+        let instruction = prompt::build_instruction(&self.prompt_extra);
+        let body = self.build_body(prompt::SYSTEM, &instruction, std::slice::from_ref(image));
+        self.send(&body)
+    }
+
+    fn analyze_video(&self, frames: &[ImageInput], transcript: Option<&str>) -> Result<AnalysisResult> {
+        let instruction = prompt::build_video_instruction(&self.prompt_extra, frames.len(), transcript);
+        let body = self.build_body(prompt::VIDEO_SYSTEM, &instruction, frames);
+        self.send(&body)
     }
 
     fn name(&self) -> &'static str {
@@ -95,13 +109,31 @@ mod tests {
             bytes: b"x".to_vec(),
             mime: "image/jpeg".into(),
         };
-        let body = p.build_body(&img);
+        let body = p.build_body(prompt::SYSTEM, "instruction", &[img]);
         assert_eq!(body["model"], "claude-3-5-sonnet-latest");
         let src = &body["messages"][0]["content"][0]["source"];
         assert_eq!(src["type"], "base64");
         assert_eq!(src["media_type"], "image/jpeg");
         assert_eq!(src["data"], "eA==");
         assert_eq!(body["messages"][0]["content"][1]["type"], "text");
+    }
+
+    #[test]
+    fn video_body_puts_every_frame_before_the_transcript_text() {
+        let mut cfg = AnalysisConfig::new(ProviderKind::Anthropic);
+        cfg.api_key = "k".into();
+        let p = AnthropicProvider::new(&cfg).unwrap();
+        let frames = vec![
+            ImageInput { bytes: b"a".to_vec(), mime: "image/jpeg".into() },
+            ImageInput { bytes: b"b".to_vec(), mime: "image/jpeg".into() },
+        ];
+        let body = p.build_body(prompt::VIDEO_SYSTEM, "instruction", &frames);
+        assert_eq!(body["system"], prompt::VIDEO_SYSTEM);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content.as_array().unwrap().len(), 3); // 2 frames + text
+        assert_eq!(content[0]["source"]["data"], "YQ==");
+        assert_eq!(content[1]["source"]["data"], "Yg==");
+        assert_eq!(content[2]["type"], "text");
     }
 
     #[test]

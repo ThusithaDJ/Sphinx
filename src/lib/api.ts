@@ -142,6 +142,62 @@ export function analyzeAsset(
   return invoke("analyze_asset", { projectId, assetId });
 }
 
+// --- SPHIN-8: video pipeline (keyframes + optional transcription) -----------
+
+export interface VideoConfig {
+  /** Empty string => look up "ffmpeg" on PATH. */
+  ffmpeg_path: string;
+  max_keyframes: number;
+  scene_threshold: number;
+}
+
+export const DEFAULT_VIDEO_CONFIG: VideoConfig = {
+  ffmpeg_path: "",
+  max_keyframes: 6,
+  scene_threshold: 0.4,
+};
+
+export interface TranscriptionConfig {
+  enabled: boolean;
+  api_key: string;
+  /** Empty string => https://api.openai.com/v1. */
+  base_url: string;
+  model: string;
+}
+
+export const DEFAULT_TRANSCRIPTION_CONFIG: TranscriptionConfig = {
+  enabled: false,
+  api_key: "",
+  base_url: "",
+  model: "whisper-1",
+};
+
+export function getVideoConfig(projectId: number): Promise<VideoConfig | null> {
+  return invoke("get_video_config", { projectId });
+}
+
+export function setVideoConfig(projectId: number, config: VideoConfig): Promise<void> {
+  return invoke("set_video_config", { projectId, config });
+}
+
+/** Resolves to ffmpeg's version string, or rejects if it isn't reachable. */
+export function checkFfmpeg(projectId: number): Promise<string> {
+  return invoke("check_ffmpeg", { projectId });
+}
+
+export function getTranscriptionConfig(
+  projectId: number
+): Promise<TranscriptionConfig | null> {
+  return invoke("get_transcription_config", { projectId });
+}
+
+export function setTranscriptionConfig(
+  projectId: number,
+  config: TranscriptionConfig
+): Promise<void> {
+  return invoke("set_transcription_config", { projectId, config });
+}
+
 // --- SPHIN-3: metadata generation & limiter profiles -------------------------
 
 /** Length/count limits enforced when generating metadata for a stock site. */

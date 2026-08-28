@@ -132,6 +132,13 @@ pub trait VisionProvider {
     /// [`CoreError::Provider`] / [`CoreError::BadResponse`] on failure.
     fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult>;
 
+    /// Analyze a sequence of keyframes sampled from a video, plus an
+    /// optional transcript of its audio (SPHIN-33). Returns the same
+    /// [`AnalysisResult`] shape as [`Self::analyze`] so downstream metadata
+    /// generation (SPHIN-3), embedding (SPHIN-4) and keyword enrichment
+    /// (SPHIN-5) need no video-specific handling.
+    fn analyze_video(&self, frames: &[ImageInput], transcript: Option<&str>) -> Result<AnalysisResult>;
+
     /// A short, stable name for logs and stored provenance ("openai", ...).
     fn name(&self) -> &'static str;
 
@@ -161,6 +168,41 @@ pub fn provider_for(config: &AnalysisConfig) -> Result<Box<dyn VisionProvider>> 
 pub fn analyze_file(config: &AnalysisConfig, path: impl AsRef<Path>) -> Result<AnalysisResult> {
     let image = ImageInput::from_path(path)?;
     provider_for(config)?.analyze(&image)
+}
+
+/// SPHIN-33: sample keyframes (and, if enabled, a transcript) from a video and
+/// run the configured vision provider against them as a single request.
+///
+/// Transcription is best-effort: if it isn't enabled, has no key configured,
+/// the video has no audio track, or the transcription call fails, analysis
+/// proceeds on keyframes alone rather than failing outright -- a transcript
+/// is a bonus signal, not a requirement, and the frames are usually
+/// sufficient on their own.
+pub fn analyze_video_file(
+    vision_config: &AnalysisConfig,
+    video_config: &crate::video::VideoConfig,
+    transcription_config: Option<&crate::transcribe::TranscriptionConfig>,
+    path: impl AsRef<Path>,
+) -> Result<AnalysisResult> {
+    let provider = provider_for(vision_config)?;
+    let path = path.as_ref();
+
+    let tmp = tempfile::tempdir()?;
+    let frame_paths = crate::video::extract_keyframes(video_config, path, tmp.path())?;
+    let frames = frame_paths
+        .iter()
+        .map(ImageInput::from_path)
+        .collect::<Result<Vec<_>>>()?;
+
+    let transcript = transcription_config
+        .filter(|tc| tc.enabled)
+        .and_then(|tc| {
+            let audio_path = tmp.path().join("audio.wav");
+            crate::video::extract_audio(video_config, path, &audio_path).ok()?;
+            crate::transcribe::transcribe(tc, &audio_path).ok()
+        });
+
+    provider.analyze_video(&frames, transcript.as_deref())
 }
 
 /// Turn the model's text output into an [`AnalysisResult`]. Tolerates the model

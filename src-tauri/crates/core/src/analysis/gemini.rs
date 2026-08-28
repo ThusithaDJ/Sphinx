@@ -14,7 +14,7 @@ pub struct GeminiProvider {
     api_key: String,
     model: String,
     base_url: String,
-    instruction: String,
+    prompt_extra: String,
 }
 
 impl GeminiProvider {
@@ -24,7 +24,7 @@ impl GeminiProvider {
             api_key: config.api_key.clone(),
             model: config.model_or_default(),
             base_url: config.base_url_or_default(),
-            instruction: prompt::build_instruction(&config.prompt_extra),
+            prompt_extra: config.prompt_extra.clone(),
         })
     }
 
@@ -35,29 +35,28 @@ impl GeminiProvider {
         format!("{}/models/{}:generateContent", self.base_url, self.model)
     }
 
-    fn build_body(&self, image: &ImageInput) -> Value {
+    fn build_body(&self, system: &str, instruction: &str, images: &[ImageInput]) -> Value {
+        let mut parts = vec![json!({ "text": instruction })];
+        for image in images {
+            parts.push(json!({ "inline_data": { "mime_type": image.mime, "data": image.base64() } }));
+        }
         json!({
-            "systemInstruction": { "parts": [ { "text": prompt::SYSTEM } ] },
-            "contents": [ { "role": "user", "parts": [
-                { "text": self.instruction },
-                { "inline_data": { "mime_type": image.mime, "data": image.base64() } }
-            ]}],
+            "systemInstruction": { "parts": [ { "text": system } ] },
+            "contents": [ { "role": "user", "parts": parts } ],
             "generationConfig": {
                 "temperature": 0.2,
                 "responseMimeType": "application/json"
             }
         })
     }
-}
 
-impl VisionProvider for GeminiProvider {
-    fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult> {
+    fn send(&self, body: &Value) -> Result<AnalysisResult> {
         let resp = http::post_json(
             &self.client,
             self.name(),
             &self.endpoint(),
             &[("x-goog-api-key", self.api_key.as_str())],
-            &self.build_body(image),
+            body,
         )?;
         let content = http::dig_str(
             self.name(),
@@ -65,6 +64,20 @@ impl VisionProvider for GeminiProvider {
             &["candidates", "0", "content", "parts", "0", "text"],
         )?;
         parse_analysis_json(self.name(), &self.model, content)
+    }
+}
+
+impl VisionProvider for GeminiProvider {
+    fn analyze(&self, image: &ImageInput) -> Result<AnalysisResult> {
+        let instruction = prompt::build_instruction(&self.prompt_extra);
+        let body = self.build_body(prompt::SYSTEM, &instruction, std::slice::from_ref(image));
+        self.send(&body)
+    }
+
+    fn analyze_video(&self, frames: &[ImageInput], transcript: Option<&str>) -> Result<AnalysisResult> {
+        let instruction = prompt::build_video_instruction(&self.prompt_extra, frames.len(), transcript);
+        let body = self.build_body(prompt::VIDEO_SYSTEM, &instruction, frames);
+        self.send(&body)
     }
 
     fn name(&self) -> &'static str {
@@ -103,7 +116,7 @@ mod tests {
             bytes: b"x".to_vec(),
             mime: "image/webp".into(),
         };
-        let body = provider().build_body(&img);
+        let body = provider().build_body(prompt::SYSTEM, "instruction", &[img]);
         let parts = &body["contents"][0]["parts"];
         assert_eq!(parts[0]["text"].as_str().unwrap().is_empty(), false);
         assert_eq!(parts[1]["inline_data"]["mime_type"], "image/webp");
@@ -112,5 +125,19 @@ mod tests {
             body["generationConfig"]["responseMimeType"],
             "application/json"
         );
+    }
+
+    #[test]
+    fn video_body_carries_every_frame_as_inline_data() {
+        let frames = vec![
+            ImageInput { bytes: b"a".to_vec(), mime: "image/jpeg".into() },
+            ImageInput { bytes: b"b".to_vec(), mime: "image/jpeg".into() },
+        ];
+        let body = provider().build_body(prompt::VIDEO_SYSTEM, "instruction", &frames);
+        assert_eq!(body["systemInstruction"]["parts"][0]["text"], prompt::VIDEO_SYSTEM);
+        let parts = &body["contents"][0]["parts"];
+        assert_eq!(parts.as_array().unwrap().len(), 3); // text + 2 frames
+        assert_eq!(parts[1]["inline_data"]["data"], "YQ==");
+        assert_eq!(parts[2]["inline_data"]["data"], "Yg==");
     }
 }

@@ -9,6 +9,8 @@ use crate::error::Result;
 use crate::keywords::KeywordConfig;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
 use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project, SftpProfileRecord};
+use crate::transcribe::TranscriptionConfig;
+use crate::video::VideoConfig;
 
 pub const SCHEMA_VERSION: i32 = 6;
 
@@ -27,6 +29,14 @@ const EMBED_CONFIG_KEY: &str = "embed_config";
 /// Key under which the per-project keyword-enrichment config JSON is stored
 /// in `project_settings` (SPHIN-5).
 const KEYWORD_CONFIG_KEY: &str = "keyword_config";
+
+/// Key under which the per-project video (ffmpeg) config JSON is stored in
+/// `project_settings` (SPHIN-31).
+const VIDEO_CONFIG_KEY: &str = "video_config";
+
+/// Key under which the per-project transcription config JSON is stored in
+/// `project_settings` (SPHIN-32).
+const TRANSCRIPTION_CONFIG_KEY: &str = "transcription_config";
 
 /// Open (creating if needed) the SQLite database at `path` and run migrations.
 pub fn open(path: impl AsRef<Path>) -> Result<Connection> {
@@ -830,6 +840,43 @@ pub fn set_keyword_config(
     set_project_setting(conn, project_id, KEYWORD_CONFIG_KEY, &json)
 }
 
+/// The per-project video (ffmpeg) configuration (SPHIN-31), or `None` if the
+/// project has never had one saved (callers should fall back to
+/// [`VideoConfig::default`]).
+pub fn get_video_config(conn: &Connection, project_id: i64) -> Result<Option<VideoConfig>> {
+    match get_project_setting(conn, project_id, VIDEO_CONFIG_KEY)? {
+        Some(json) => Ok(Some(serde_json::from_str(&json)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn set_video_config(conn: &Connection, project_id: i64, config: &VideoConfig) -> Result<()> {
+    let json = serde_json::to_string(config)?;
+    set_project_setting(conn, project_id, VIDEO_CONFIG_KEY, &json)
+}
+
+/// The per-project transcription configuration (SPHIN-32), or `None` if the
+/// project has never had one saved (callers should fall back to
+/// [`TranscriptionConfig::default`], which is disabled).
+pub fn get_transcription_config(
+    conn: &Connection,
+    project_id: i64,
+) -> Result<Option<TranscriptionConfig>> {
+    match get_project_setting(conn, project_id, TRANSCRIPTION_CONFIG_KEY)? {
+        Some(json) => Ok(Some(serde_json::from_str(&json)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn set_transcription_config(
+    conn: &Connection,
+    project_id: i64,
+    config: &TranscriptionConfig,
+) -> Result<()> {
+    let json = serde_json::to_string(config)?;
+    set_project_setting(conn, project_id, TRANSCRIPTION_CONFIG_KEY, &json)
+}
+
 // --- keyword cache (SPHIN-24) -------------------------------------------------
 
 fn normalize_seed(seed: &str) -> String {
@@ -1306,6 +1353,41 @@ mod tests {
         let back = get_keyword_config(&conn, 1).unwrap().unwrap();
         assert_eq!(back.shutterstock.unwrap().api_key, "sk-1");
         assert!(back.adobe_stock.is_none());
+    }
+
+    #[test]
+    fn video_config_roundtrips_per_project() {
+        let conn = open_in_memory().unwrap();
+        assert!(get_video_config(&conn, 1).unwrap().is_none());
+
+        let config = VideoConfig {
+            ffmpeg_path: "C:\\Tools\\ffmpeg.exe".into(),
+            max_keyframes: 10,
+            scene_threshold: 0.25,
+        };
+        set_video_config(&conn, 1, &config).unwrap();
+
+        let back = get_video_config(&conn, 1).unwrap().unwrap();
+        assert_eq!(back.ffmpeg_path, "C:\\Tools\\ffmpeg.exe");
+        assert_eq!(back.max_keyframes, 10);
+    }
+
+    #[test]
+    fn transcription_config_roundtrips_per_project() {
+        let conn = open_in_memory().unwrap();
+        assert!(get_transcription_config(&conn, 1).unwrap().is_none());
+
+        let config = TranscriptionConfig {
+            enabled: true,
+            api_key: "sk-whisper".into(),
+            base_url: String::new(),
+            model: "whisper-1".into(),
+        };
+        set_transcription_config(&conn, 1, &config).unwrap();
+
+        let back = get_transcription_config(&conn, 1).unwrap().unwrap();
+        assert!(back.enabled);
+        assert_eq!(back.api_key, "sk-whisper");
     }
 
     #[test]

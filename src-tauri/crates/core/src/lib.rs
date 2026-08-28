@@ -16,6 +16,8 @@
 //!   Adobe Stock APIs (the local lookup cache lives in [`db`]).
 //! - [`upload`] — SPHIN-6, SFTP upload to a stock site (credentials live in
 //!   the OS credential store via [`secrets`], never in `sphinx.db`).
+//! - [`video`], [`transcribe`] — SPHIN-8, keyframe/audio extraction and
+//!   transcription feeding [`analysis`]'s video-specific prompting.
 
 pub mod analysis;
 pub mod db;
@@ -27,7 +29,9 @@ pub mod keywords;
 pub mod metadata;
 pub mod models;
 pub mod secrets;
+pub mod transcribe;
 pub mod upload;
+pub mod video;
 pub mod watch;
 
 pub use error::{CoreError, Result};
