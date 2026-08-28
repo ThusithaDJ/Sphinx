@@ -30,12 +30,22 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Thusitha Jayasundara",
+    "copyright": "Copyright © 2026 Thusitha Jayasundara",
+    "category": "Photography",
+    "shortDescription": "AI-assisted stock metadata generation for images and video",
+    "longDescription": "Sphinx ingests photos and video, analyzes them with a vision model (cloud or local via Ollama), generates titles/descriptions/keywords fit to each stock site's limits, embeds IPTC/XMP metadata, enriches keywords against Shutterstock/Adobe Stock demand data, and uploads over SFTP.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
