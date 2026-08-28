@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><style>body{margin:0;background:#f0eee9;font-family:"Segoe UI",system-ui,-apple-system,sans-serif}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}.dv-card{max-width:100%;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden}.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}a{color:#2a78d6}a:hover{color:#1b5aa8}</style></helmet>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Pipeline direction (<a class="dv-oid" href="#1b">1b</a>) built out across all seven screens</span></div>
+
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a"><div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Screen 1 — Import: drop target, watch folders, pre-flight checks</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Import" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700;letter-spacing:.02em">Sphinx</span><span style="color:#8b919c;font-size:12px">Default project</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Import</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Library <span style="color:#8b919c">42</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Review <span style="color:#8b919c">12</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Queue <span style="color:#8b919c">2</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Settings</span>
+</div>
+<div style="flex:1"></div>
+<div style="display:flex;align-items:center;gap:8px;color:#5c636e;font-size:12px">
+<span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#1a7f37"></span>OpenAI GPT-4o</span>
+<span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#b7791f"></span>ffmpeg missing</span>
+</div>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="flex:1;padding:20px;display:flex;flex-direction:column;gap:16px;min-height:0">
+<div style="flex:none;border:2px dashed #c3cbdd;border-radius:12px;background:#fff;padding:40px 24px;display:flex;flex-direction:column;align-items:center;gap:10px">
+<div style="width:44px;height:44px;border-radius:12px;background:#eef2fb;color:#2f6fed;display:flex;align-items:center;justify-content:center;font-size:20px">↓</div>
+<div style="font-size:16px;font-weight:700">Drop images, videos or folders here</div>
+<div style="font-size:12.5px;color:#8b919c">JPEG, PNG, TIFF (flattened), MP4, MOV · files are hashed on ingest so duplicates never re-bill the model</div>
+<div style="display:flex;gap:8px;margin-top:6px">
+<button style="font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Choose files…</button>
+<button style="font:inherit;font-size:13px;padding:7px 14px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#171a1f;cursor:pointer">Add watch folder…</button>
+</div>
+</div>
+
+<div style="flex:1;background:#fff;border:1px solid #e4e6ea;border-radius:12px;display:flex;flex-direction:column;min-height:0">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid #eef0f3;flex:none">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Watch folders</span>
+<span style="font-size:11.5px;color:#2f6fed;font-weight:600">Scan all now</span>
+</div>
+<div style="flex:1;overflow-y:auto">
+<sc-for list="{{ watchFolders }}" as="w" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:11px;padding:12px 16px;border-bottom:1px solid #f4f5f7">
+<span style="width:8px;height:8px;border-radius:50%;background:{{ w.dot }};flex:none"></span>
+<div style="flex:1;min-width:0">
+<div style="font-size:12.5px;font-weight:600;font-family:ui-monospace,Consolas,monospace">{{ w.path }}</div>
+<div style="font-size:11px;color:#8b919c;margin-top:2px">{{ w.meta }}</div>
+</div>
+<span style="padding:3px 9px;border-radius:999px;border:1px solid #dfe2e7;font-size:11px;color:#5c636e">{{ w.on }}</span>
+<span style="font-size:11.5px;color:#8b919c">Remove</span>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="width:432px;flex:none;background:#fff;border-left:1px solid #e4e6ea;display:flex;flex-direction:column;min-height:0">
+<div style="padding:14px 16px 12px;border-bottom:1px solid #eef0f3;flex:none;display:flex;align-items:baseline;justify-content:space-between">
+<span style="font-size:13px;font-weight:700">Incoming <span style="color:#8b919c;font-weight:400">6 files</span></span>
+<span style="font-size:11.5px;color:#8b919c">pre-flight</span>
+</div>
+<div style="flex:1;overflow-y:auto">
+<sc-for list="{{ dropIncoming }}" as="f" hint-placeholder-count="6">
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid #f4f5f7">
+<div style="width:40px;height:30px;border-radius:5px;background:#eef0f3;flex:none"></div>
+<div style="flex:1;min-width:0">
+<div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.name }}</div>
+<div style="font-size:11px;color:#8b919c;margin-top:2px">{{ f.meta }}</div>
+</div>
+<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:{{ f.dot }};flex:none"><span style="width:7px;height:7px;border-radius:50%;background:{{ f.dot }}"></span>{{ f.note }}</span>
+</div>
+</sc-for>
+</div>
+<div style="padding:12px 16px;border-top:1px solid #eef0f3;flex:none;display:flex;flex-direction:column;gap:9px">
+<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#5c636e"><input type="checkbox" checked style="accent-color:#2f6fed">Queue analysis immediately after ingest</label>
+<div style="display:flex;gap:8px">
+<button style="flex:1;font:inherit;font-size:13px;font-weight:600;padding:8px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Ingest 4 eligible</button>
+<button style="font:inherit;font-size:13px;padding:8px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#171a1f;cursor:pointer">Clear</button>
+</div>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>2 files skipped: 1 duplicate, 1 unsupported</span><span>·</span><span>sphinx.db 18.2 MB</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="2b"><div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Screen 2 — Library: stage-first grid with the compliance inspector (<a class="dv-oid" href="#1b">1b</a>, carried forward)</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Library" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700;letter-spacing:.02em">Sphinx</span><span style="color:#8b919c;font-size:12px">Default project</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Import</span>
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Library</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Review <span style="color:#8b919c">12</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Queue <span style="color:#8b919c">2</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Settings</span>
+</div>
+<div style="flex:1"></div>
+<button style="font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Import…</button>
+</div>
+
+<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:center;gap:7px;padding:6px 10px;width:250px;border:1px solid #dfe2e7;border-radius:7px;color:#8b919c;font-size:13px"><span style="font-size:12px">⌕</span>Search title, keyword, path</div>
+<div style="display:flex;gap:6px">
+<span style="padding:5px 11px;border-radius:999px;background:#171a1f;color:#fff;font-size:12px;font-weight:600">All 42</span>
+<span style="padding:5px 11px;border-radius:999px;background:#fff;border:1px solid #dfe2e7;color:#5c636e;font-size:12px">Needs review 12</span>
+<span style="padding:5px 11px;border-radius:999px;background:#fff;border:1px solid #dfe2e7;color:#5c636e;font-size:12px">Ready 18</span>
+<span style="padding:5px 11px;border-radius:999px;background:#fff;border:1px solid #dfe2e7;color:#5c636e;font-size:12px">Failed 2</span>
+</div>
+<div style="flex:1"></div>
+<span style="color:#8b919c;font-size:12px">Target</span>
+<div style="display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #dfe2e7;border-radius:7px;font-size:13px">Shutterstock <span style="color:#8b919c;font-size:11px">▾</span></div>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="flex:1;padding:16px;overflow-y:auto">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+<span style="font-size:12px;color:#5c636e"><b style="color:#171a1f">3 selected</b> · 42 assets in Default project</span>
+<div style="display:flex;gap:6px">
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Analyze</button>
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Generate metadata</button>
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Embed</button>
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Upload</button>
+</div></div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+<sc-for list="{{ assets }}" as="a" hint-placeholder-count="9">
+<div style="background:#fff;border:1px solid {{ a.cardBorder }};border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(20,24,32,.05)">
+<div style="height:112px;background:linear-gradient(135deg,{{ a.c1 }},{{ a.c2 }});position:relative">
+<span style="position:absolute;top:8px;left:8px;padding:2px 6px;border-radius:5px;background:rgba(10,14,20,.55);color:#fff;font-size:10px;font-weight:600;letter-spacing:.03em;text-transform:uppercase">{{ a.kind }}</span>
+<span style="position:absolute;top:8px;right:8px;padding:2px 6px;border-radius:5px;background:{{ a.flagBg }};color:{{ a.flagFg }};font-size:10px;font-weight:600">{{ a.flag }}</span>
+</div>
+<div style="padding:9px 10px 11px;display:flex;flex-direction:column;gap:7px">
+<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.name }}</div>
+<div style="font-size:11.5px;color:#5c636e;line-height:1.35;height:31px;overflow:hidden">{{ a.title }}</div>
+<div style="display:flex;align-items:center;gap:8px">
+<div style="display:flex;align-items:center;gap:4px">
+<sc-for list="{{ a.dots }}" as="d" hint-placeholder-count="5"><span title="{{ d.label }}" style="width:7px;height:7px;border-radius:50%;background:{{ d.bg }}"></span></sc-for>
+</div>
+<span style="font-size:11px;color:#8b919c">{{ a.stageLabel }}</span>
+<div style="flex:1"></div>
+<span style="font-size:11px;color:#8b919c">{{ a.kwCount }} kw</span>
+</div>
+</div></div>
+</sc-for>
+</div>
+</div>
+
+<div style="width:392px;flex:none;background:#fff;border-left:1px solid #e4e6ea;display:flex;flex-direction:column;min-height:0">
+<div style="padding:14px 16px 12px;border-bottom:1px solid #eef0f3;flex:none">
+<div style="display:flex;gap:12px">
+<div style="width:96px;height:64px;border-radius:8px;background:linear-gradient(135deg,#7d94b8,#e3d3b0);flex:none"></div>
+<div style="min-width:0">
+<div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ridge-pine-dawn-0412.jpg</div>
+<div style="font-size:11.5px;color:#8b919c;margin-top:2px">JPEG · 8.4 MB · 6000×4000</div>
+<div style="display:flex;gap:5px;margin-top:7px">
+<span style="padding:2px 7px;border-radius:5px;background:rgba(26,127,55,.12);color:#1a7f37;font-size:10.5px;font-weight:600">commercial-safe</span>
+<span style="padding:2px 7px;border-radius:5px;background:#f0f2f5;color:#5c636e;font-size:10.5px">gpt-4o</span>
+</div>
+</div></div></div>
+
+<div style="flex:1;overflow-y:auto;padding:14px 16px 0">
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Title</span>
+<span style="font-size:11px;color:#5c636e;font-family:ui-monospace,Consolas,monospace">62 / 200</span></div>
+<div style="padding:8px 10px;border:1px solid #dfe2e7;border-radius:7px;font-size:13px;line-height:1.4">Lone Scots pine on a frosted ridge at sunrise with valley mist</div>
+
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin:16px 0 7px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Keywords <span style="color:#171a1f">34</span></span>
+<span style="font-size:11.5px;color:#2f6fed;font-weight:600">Open editor →</span></div>
+<div style="display:flex;flex-wrap:wrap;gap:5px">
+<sc-for list="{{ inspectorKeywords }}" as="k" hint-placeholder-count="18">
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;border:1px solid {{ k.bd }};background:{{ k.bg }};font-size:11.5px;color:#171a1f">{{ k.word }}<span style="font-size:9.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">{{ k.score }}</span></span>
+</sc-for>
+</div>
+
+<div style="margin:18px 0 7px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Site compliance</div>
+<div style="border:1px solid #e4e6ea;border-radius:8px;overflow:hidden">
+<sc-for list="{{ compliance }}" as="s" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #eef0f3">
+<span style="width:8px;height:8px;border-radius:50%;background:{{ s.dot }};flex:none"></span>
+<span style="font-size:12px;font-weight:600;width:96px;flex:none">{{ s.site }}</span>
+<div style="flex:1;display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;justify-content:space-between;font-size:10.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace"><span>title {{ s.title }}</span><span>kw {{ s.kw }}</span></div>
+<div style="height:3px;border-radius:2px;background:#eef0f3;overflow:hidden"><div style="height:3px;width:{{ s.pct }};background:{{ s.dot }}"></div></div>
+</div>
+<span style="font-size:10.5px;font-weight:600;color:{{ s.dot }};width:52px;text-align:right">{{ s.verdict }}</span>
+</div>
+</sc-for>
+</div>
+<div style="height:14px"></div>
+</div>
+
+<div style="padding:12px 16px;border-top:1px solid #eef0f3;display:flex;gap:8px;flex:none">
+<button style="flex:1;font:inherit;font-size:13px;font-weight:600;padding:8px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Approve &amp; embed</button>
+<button style="font:inherit;font-size:13px;padding:8px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Regenerate</button>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>Watching D:\Photos\2026-08 — 2 new files</span><span>·</span><span>Queue: 2 running · 5 pending</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="2c"><div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Screen 3 — Asset editor: full metadata record, drag-ordered keyword field, per-site preview</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Asset editor" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:14px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<span style="font-size:13px;color:#2f6fed;font-weight:600">← Library</span>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<span style="font-size:13px;font-weight:700">ridge-pine-dawn-0412.jpg</span>
+<span style="padding:2px 8px;border-radius:5px;background:rgba(47,111,237,.14);color:#2f6fed;font-size:11px;font-weight:600">needs review</span>
+<span style="font-size:12px;color:#8b919c">asset 12 of 42</span>
+<div style="flex:1"></div>
+<span style="font-size:12px;color:#8b919c">Unsaved changes</span>
+<button style="font:inherit;font-size:13px;padding:6px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#171a1f;cursor:pointer">Revert to AI</button>
+<button style="font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Save &amp; embed</button>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="width:352px;flex:none;background:#fff;border-right:1px solid #e4e6ea;padding:16px;display:flex;flex-direction:column;gap:14px;overflow-y:auto">
+<div style="height:220px;border-radius:10px;background:linear-gradient(135deg,#7d94b8,#e3d3b0)"></div>
+<div style="display:grid;gap:6px;font-size:12px;color:#5c636e">
+<div style="display:flex;justify-content:space-between"><span>Format</span><span style="color:#171a1f">JPEG · 8.4 MB</span></div>
+<div style="display:flex;justify-content:space-between"><span>Dimensions</span><span style="color:#171a1f">6000 × 4000 · 24 MP</span></div>
+<div style="display:flex;justify-content:space-between"><span>Captured</span><span style="color:#171a1f">12 Aug 2026, 06:41</span></div>
+<div style="display:flex;justify-content:space-between"><span>Camera</span><span style="color:#171a1f">A7R V · 70 mm · f/8</span></div>
+<div style="display:flex;justify-content:space-between"><span>Hash</span><span style="color:#171a1f;font-family:ui-monospace,Consolas,monospace">b3:9f4c1a…d072</span></div>
+</div>
+<div style="border-top:1px solid #eef0f3;padding-top:12px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:8px">Pipeline</div>
+<div style="display:grid;gap:7px;font-size:12px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#1a7f37"></span>Analyzed <span style="color:#8b919c;margin-left:auto">gpt-4o · 3.1 s</span></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#1a7f37"></span>Metadata generated <span style="color:#8b919c;margin-left:auto">34 kw</span></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#1a7f37"></span>Enriched <span style="color:#8b919c;margin-left:auto">+9 demand terms</span></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#dfe2e7"></span><span style="color:#8b919c">Embed pending</span></div>
+<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#dfe2e7"></span><span style="color:#8b919c">Upload pending</span></div>
+</div>
+</div>
+</div>
+
+<div style="flex:1;padding:18px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;min-width:0">
+<div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Title</span>
+<span style="font-size:11px;color:#b7791f;font-family:ui-monospace,Consolas,monospace">62 / 70 Adobe limit</span></div>
+<div style="padding:11px 13px;background:#fff;border:1px solid #2f6fed;border-radius:8px;font-size:15px;line-height:1.4;box-shadow:0 0 0 3px rgba(47,111,237,.1)">Lone Scots pine on a frosted ridge at sunrise with valley mist</div>
+</div>
+<div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Description</span>
+<span style="font-size:11px;color:#5c636e;font-family:ui-monospace,Consolas,monospace">99 / 200</span></div>
+<div style="padding:11px 13px;background:#fff;border:1px solid #dfe2e7;border-radius:8px;font-size:13.5px;line-height:1.5;color:#3d434c;min-height:52px">A single Scots pine stands on a frost-covered mountain ridge at dawn, mist filling the valley below.</div>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;background:#fff;border:1px solid #e4e6ea;border-radius:10px;min-height:0">
+<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #eef0f3;flex:none">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Keyword field <span style="color:#171a1f">34</span></span>
+<span style="font-size:11.5px;color:#8b919c">drag to reorder priority · warm = high blended demand</span>
+<div style="flex:1"></div>
+<span style="font-size:11.5px;color:#2f6fed;font-weight:600">Enrich +</span>
+<span style="font-size:11.5px;color:#5c636e">Sort by heat</span>
+</div>
+<div style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start">
+<sc-for list="{{ editorKeywords }}" as="k" hint-placeholder-count="26">
+<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 9px 5px 6px;border-radius:8px;border:1px solid {{ k.bd }};background:{{ k.bg }};font-size:12.5px;color:#171a1f;cursor:grab">
+<span style="color:{{ k.grab }};font-size:10px;letter-spacing:-1px">⠿</span>{{ k.word }}
+<span style="font-size:10px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">{{ k.score }}</span>
+<span style="color:#c9ced6;font-size:11px">×</span></span>
+</sc-for>
+<span style="padding:5px 11px;border-radius:8px;border:1px dashed #c9ced6;color:#8b919c;font-size:12.5px">+ add keyword</span>
+</div>
+<div style="flex:none;padding:10px 14px;border-top:1px solid #eef0f3;display:flex;align-items:center;gap:10px;font-size:11.5px;color:#8b919c">
+<span>avg heat 58</span><span>·</span><span>3 terms below demand floor 20</span><span>·</span><span>order is stored but not sent to sites</span>
+</div>
+</div>
+</div>
+
+<div style="width:344px;flex:none;background:#fff;border-left:1px solid #e4e6ea;display:flex;flex-direction:column;min-height:0">
+<div style="padding:13px 16px;border-bottom:1px solid #eef0f3;flex:none">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:9px">Preview as</div>
+<div style="display:flex;gap:5px">
+<sc-for list="{{ editorSites }}" as="s" hint-placeholder-count="4">
+<span style="padding:4px 10px;border-radius:999px;background:{{ s.bg }};color:{{ s.fg }};border:1px solid #dfe2e7;font-size:11.5px;font-weight:600">{{ s.site }}</span>
+</sc-for>
+</div></div>
+<div style="flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+<div style="border:1px solid #e4e6ea;border-radius:9px;padding:12px;background:#fbfcfd">
+<div style="font-size:11px;color:#8b919c;margin-bottom:6px">Shutterstock submission</div>
+<div style="font-size:13px;font-weight:600;line-height:1.35">Lone Scots pine on a frosted ridge at sunrise with valley mist</div>
+<div style="font-size:11.5px;color:#5c636e;margin-top:6px;line-height:1.45">34 keywords · commercial · no release required</div>
+</div>
+<div>
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:8px">Limits</div>
+<div style="border:1px solid #e4e6ea;border-radius:8px;overflow:hidden">
+<sc-for list="{{ compliance }}" as="s" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #eef0f3">
+<span style="width:8px;height:8px;border-radius:50%;background:{{ s.dot }};flex:none"></span>
+<span style="font-size:12px;font-weight:600;flex:1">{{ s.site }}</span>
+<span style="font-size:10.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">{{ s.title }} · {{ s.kw }}</span>
+</div>
+</sc-for>
+</div></div>
+<div>
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:8px">Embed targets</div>
+<div style="display:grid;gap:7px;font-size:12px;color:#5c636e">
+<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked style="accent-color:#2f6fed">IPTC Keywords + Headline</label>
+<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked style="accent-color:#2f6fed">XMP dc:subject / dc:title</label>
+<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" style="accent-color:#2f6fed">EXIF ImageDescription</label>
+</div></div>
+<div>
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:8px">Rejected by you</div>
+<div style="display:flex;flex-wrap:wrap;gap:5px">
+<sc-for list="{{ rejected }}" as="r" hint-placeholder-count="3">
+<span style="padding:3px 8px;border-radius:7px;background:#f4f5f7;border:1px dashed #d5d9df;color:#8b919c;font-size:11px;text-decoration:line-through">{{ r.word }}</span>
+</sc-for>
+</div></div>
+</div>
+<div style="padding:12px 16px;border-top:1px solid #eef0f3;flex:none;display:flex;gap:8px">
+<button style="flex:1;font:inherit;font-size:13px;font-weight:600;padding:8px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Approve &amp; next →</button>
+<button style="font:inherit;font-size:13px;padding:8px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Regenerate</button>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>⌘S save · ⌘⏎ approve and next · ⌥1–4 switch preview site</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="2d"><div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Screen 4 — Review: keyboard triage, one asset at a time with a check list</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Review triage" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700">Sphinx</span><span style="color:#8b919c;font-size:12px">Review queue</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Import</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Library</span>
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Review</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Queue <span style="color:#8b919c">2</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Settings</span>
+</div>
+<div style="flex:1"></div>
+<div style="display:flex;align-items:center;gap:9px">
+<span style="font-size:12px;color:#5c636e">2 of 12 reviewed</span>
+<div style="width:150px;height:5px;border-radius:3px;background:#eef0f3;overflow:hidden"><div style="width:17%;height:5px;background:#2f6fed"></div></div>
+</div>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="width:132px;flex:none;background:#fff;border-right:1px solid #e4e6ea;padding:12px 10px;overflow-y:auto;display:flex;flex-direction:column;gap:9px">
+<sc-for list="{{ triageQueue }}" as="t" hint-placeholder-count="7">
+<div style="position:relative;border-radius:8px;border:2px solid {{ t.bd }};overflow:hidden">
+<div style="height:74px;background:linear-gradient(135deg,{{ t.c1 }},{{ t.c2 }})"></div>
+<span style="position:absolute;top:5px;right:5px;width:16px;height:16px;border-radius:50%;background:{{ t.markBg }};color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center">{{ t.mark }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="flex:1;display:flex;flex-direction:column;padding:18px 20px;gap:14px;min-width:0">
+<div style="flex:1;border-radius:12px;background:linear-gradient(135deg,#8c7f74,#efe6da);position:relative;min-height:0">
+<span style="position:absolute;bottom:12px;left:14px;padding:4px 9px;border-radius:6px;background:rgba(10,14,20,.6);color:#fff;font-size:11.5px">studio-ceramics-114.jpg · 6000×4000 · gpt-4o</span>
+</div>
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;padding:14px 16px;display:flex;flex-direction:column;gap:11px">
+<div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Proposed title</span>
+<span style="font-size:11px;color:#5c636e;font-family:ui-monospace,Consolas,monospace">58 / 70</span></div>
+<div style="font-size:15px;line-height:1.4;font-weight:600">Unglazed stoneware bowls drying on a workshop shelf</div>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:5px">
+<sc-for list="{{ inspectorKeywords }}" as="k" hint-placeholder-count="18">
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;border:1px solid {{ k.bd }};background:{{ k.bg }};font-size:11.5px">{{ k.word }}<span style="font-size:9.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">{{ k.score }}</span></span>
+</sc-for>
+<span style="font-size:11.5px;color:#8b919c;align-self:center">+16 more</span>
+</div>
+</div>
+</div>
+
+<div style="width:330px;flex:none;background:#fff;border-left:1px solid #e4e6ea;display:flex;flex-direction:column;min-height:0">
+<div style="padding:14px 16px;flex:1;overflow-y:auto">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Pre-approval checks</div>
+<div style="display:grid;gap:9px;margin-top:11px">
+<sc-for list="{{ triageChecks }}" as="c" hint-placeholder-count="5">
+<div style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;line-height:1.4">
+<span style="width:8px;height:8px;border-radius:50%;background:{{ c.dot }};margin-top:5px;flex:none"></span>
+<span style="flex:1">{{ c.label }}</span>
+<span style="font-size:10.5px;font-weight:600;color:{{ c.dot }}">{{ c.state }}</span>
+</div>
+</sc-for>
+</div>
+<div style="margin-top:18px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Flag for rework</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:9px">
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;font-size:11.5px;color:#5c636e">wrong subject</span>
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;font-size:11.5px;color:#5c636e">too generic</span>
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;font-size:11.5px;color:#5c636e">trademark risk</span>
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;font-size:11.5px;color:#5c636e">needs release</span>
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;font-size:11.5px;color:#5c636e">editorial only</span>
+</div>
+<div style="margin-top:18px;padding:11px 12px;border-radius:9px;background:#f6f7f9;font-size:12px;color:#5c636e;line-height:1.45">Approving embeds IPTC/XMP into the file and queues the upload for <b style="color:#171a1f">Shutterstock</b> and <b style="color:#171a1f">Adobe Stock</b>.</div>
+</div>
+<div style="padding:12px 16px;border-top:1px solid #eef0f3;flex:none;display:flex;flex-direction:column;gap:8px">
+<button style="font:inherit;font-size:13px;font-weight:600;padding:9px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Approve &amp; next  ⏎</button>
+<div style="display:flex;gap:8px">
+<button style="flex:1;font:inherit;font-size:12.5px;padding:8px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#171a1f;cursor:pointer">Edit  E</button>
+<button style="flex:1;font:inherit;font-size:12.5px;padding:8px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#b3261e;cursor:pointer">Reject  R</button>
+<button style="flex:1;font:inherit;font-size:12.5px;padding:8px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#5c636e;cursor:pointer">Skip  S</button>
+</div>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>J / K move · ⏎ approve · R reject · 10 assets left in queue</span>
+</div>
+</div></div></div>
+<div class="dv-opt" id="2e"><div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Screen 5 — Queue: live jobs, retries and failure detail</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Queue" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700">Sphinx</span><span style="color:#8b919c;font-size:12px">Default project</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Import</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Library</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Review <span style="color:#8b919c">12</span></span>
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Queue</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Settings</span>
+</div>
+<div style="flex:1"></div>
+<button style="font:inherit;font-size:13px;padding:6px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#171a1f;cursor:pointer">Pause queue</button>
+<button style="font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Retry failed (2)</button>
+</div>
+
+<div style="padding:16px 20px;flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+<div style="background:#fff;border:1px solid #e4e6ea;border-radius:10px;padding:13px 14px"><div style="font-size:23px;font-weight:700;letter-spacing:-.02em">2</div><div style="font-size:11.5px;color:#8b919c;margin-top:2px">running</div></div>
+<div style="background:#fff;border:1px solid #e4e6ea;border-radius:10px;padding:13px 14px"><div style="font-size:23px;font-weight:700;letter-spacing:-.02em">5</div><div style="font-size:11.5px;color:#8b919c;margin-top:2px">pending</div></div>
+<div style="background:#fff;border:1px solid #e4e6ea;border-radius:10px;padding:13px 14px"><div style="font-size:23px;font-weight:700;letter-spacing:-.02em">31</div><div style="font-size:11.5px;color:#8b919c;margin-top:2px">done today</div></div>
+<div style="background:#fff;border:1px solid #e4e6ea;border-radius:10px;padding:13px 14px"><div style="font-size:23px;font-weight:700;letter-spacing:-.02em;color:#b3261e">2</div><div style="font-size:11.5px;color:#8b919c;margin-top:2px">failed</div></div>
+<div style="background:#fff;border:1px solid #e4e6ea;border-radius:10px;padding:13px 14px"><div style="font-size:23px;font-weight:700;letter-spacing:-.02em">$1.86</div><div style="font-size:11.5px;color:#8b919c;margin-top:2px">model spend today</div></div>
+</div>
+
+<div style="flex:1;display:flex;min-height:0;padding:0 20px 20px;gap:16px">
+<div style="flex:1;background:#fff;border:1px solid #e4e6ea;border-radius:11px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef0f3;flex:none">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Jobs</span>
+<div style="flex:1"></div>
+<span style="padding:4px 10px;border-radius:999px;background:#171a1f;color:#fff;font-size:11.5px;font-weight:600">All</span>
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;color:#5c636e;font-size:11.5px">Running</span>
+<span style="padding:4px 10px;border-radius:999px;border:1px solid #dfe2e7;color:#5c636e;font-size:11.5px">Failed</span>
+<span style="font-size:11.5px;color:#5c636e">Concurrency 2 ▾</span>
+</div>
+<div style="flex:1;overflow-y:auto">
+<sc-for list="{{ jobs }}" as="j" hint-placeholder-count="7">
+<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f4f5f7">
+<div style="width:40px;height:30px;border-radius:5px;background:#eef0f3;flex:none"></div>
+<div style="flex:1;min-width:0">
+<div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ j.asset }}</div>
+<div style="font-size:11px;color:#8b919c;margin-top:2px">{{ j.step }}</div>
+</div>
+<div style="width:150px;flex:none">
+<div style="height:5px;border-radius:3px;background:#eef0f3;overflow:hidden"><div style="height:5px;width:{{ j.pct }};background:{{ j.bg }}"></div></div>
+<div style="font-size:10.5px;color:#8b919c;margin-top:4px;font-family:ui-monospace,Consolas,monospace">{{ j.pct }} · {{ j.eta }}</div>
+</div>
+<span style="padding:3px 9px;border-radius:999px;background:{{ j.chipBg }};color:{{ j.chipFg }};font-size:11px;font-weight:600;width:62px;text-align:center;flex:none">{{ j.state }}</span>
+<span style="font-size:11.5px;color:#5c636e;width:44px;text-align:right;flex:none">Cancel</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="width:376px;flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+<div style="padding:12px 16px;border-bottom:1px solid #eef0f3;flex:none;display:flex;align-items:center;gap:8px">
+<span style="width:8px;height:8px;border-radius:50%;background:#b3261e"></span>
+<span style="font-size:12.5px;font-weight:700">cliff-path-timelapse.mp4</span>
+<span style="font-size:11px;color:#8b919c">failed 2×</span>
+</div>
+<div style="flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+<div style="padding:11px 12px;border-radius:9px;background:rgba(179,38,30,.07);border:1px solid rgba(179,38,30,.22);font-size:12.5px;color:#8f2019;line-height:1.45"><b>Extract keyframes failed</b><br>ffmpeg not found: program not found in PATH</div>
+<div>
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:8px">Log</div>
+<div style="border:1px solid #e4e6ea;border-radius:8px;background:#fbfcfd;padding:10px 11px;font:11px/1.6 ui-monospace,Consolas,monospace;color:#5c636e">
+09:16:03 ingest ok (412.6 MB)<br>09:16:04 probe: 3840×2160 · 24 fps · 38 s<br>09:16:04 keyframe plan: 6 frames @ 6 s<br>09:16:04 spawn ffmpeg…<br><span style="color:#b3261e">09:16:04 error: program not found</span><br>09:16:34 retry 1/3 — same error
+</div></div>
+<div>
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c;margin-bottom:8px">Fix</div>
+<div style="font-size:12.5px;color:#5c636e;line-height:1.5">Point Sphinx at an ffmpeg binary in <b style="color:#171a1f">Settings → Video pipeline</b>, or drop still frames in manually.</div>
+<button style="margin-top:10px;font:inherit;font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#2f6fed;cursor:pointer">Open video settings</button>
+</div>
+</div>
+<div style="padding:12px 16px;border-top:1px solid #eef0f3;flex:none;display:flex;gap:8px">
+<button style="flex:1;font:inherit;font-size:13px;font-weight:600;padding:8px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Retry job</button>
+<button style="font:inherit;font-size:13px;padding:8px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#171a1f;cursor:pointer">Remove</button>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>Worker pool 2/4 · avg analyze 3.4 s · avg generate 2.1 s</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="2f"><div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a>Screen 6 — Sites: per-site limit profiles and upload transport</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Sites" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700">Sphinx</span><span style="color:#8b919c;font-size:12px">Default project</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Import</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Library</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Review <span style="color:#8b919c">12</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Queue <span style="color:#8b919c">2</span></span>
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Settings</span>
+</div>
+<div style="flex:1"></div>
+<button style="font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Add site profile</button>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="width:400px;flex:none;background:#fff;border-right:1px solid #e4e6ea;overflow-y:auto">
+<sc-for list="{{ siteProfiles }}" as="s" hint-placeholder-count="4">
+<div style="display:flex;align-items:flex-start;gap:11px;padding:14px 16px;border-bottom:1px solid #f4f5f7;background:#fff">
+<span style="width:8px;height:8px;border-radius:50%;background:{{ s.dot }};margin-top:6px;flex:none"></span>
+<div style="flex:1;min-width:0">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:13px;font-weight:700">{{ s.site }}</span><span style="font-size:11px;color:#8b919c">{{ s.status }}</span></div>
+<div style="font-size:11.5px;color:#5c636e;margin-top:3px">{{ s.limits }}</div>
+<div style="font-size:11px;color:#8b919c;margin-top:2px;font-family:ui-monospace,Consolas,monospace">{{ s.transport }}</div>
+</div>
+</div>
+</sc-for>
+<div style="padding:14px 16px;font-size:12px;color:#8b919c">Metadata is validated against every enabled profile before a file can be approved.</div>
+</div>
+
+<div style="flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:16px">
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;padding:16px 18px">
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-size:15px;font-weight:700">Shutterstock</span>
+<span style="padding:2px 8px;border-radius:5px;background:rgba(26,127,55,.13);color:#177d34;font-size:11px;font-weight:600">default target</span>
+<div style="flex:1"></div>
+<span style="font-size:12px;color:#5c636e">Enabled</span>
+<span style="width:34px;height:19px;border-radius:999px;background:#2f6fed;position:relative;display:inline-block"><span style="position:absolute;top:2px;right:2px;width:15px;height:15px;border-radius:50%;background:#fff"></span></span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px">
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Title max<input value="200" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Description max<input value="200" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Keyword range<input value="7 – 50" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+</div>
+<div style="display:grid;gap:8px;margin-top:14px;font-size:12.5px;color:#5c636e">
+<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked style="accent-color:#2f6fed">Reject keywords containing brand or trademark terms</label>
+<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked style="accent-color:#2f6fed">Truncate title on export rather than blocking approval</label>
+<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" style="accent-color:#2f6fed">Include location keywords from EXIF GPS</label>
+</div>
+</div>
+
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;padding:16px 18px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Upload transport</div>
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-top:13px">
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Host<input value="ftp.shutterstock.com" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f;font-family:ui-monospace,Consolas,monospace"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Port<input value="22" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Username<input value="contributor-9182" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Key<input value="~/.ssh/id_ed25519" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+<button style="font:inherit;font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#2f6fed;cursor:pointer">Test connection</button>
+<span style="font-size:11.5px;color:#177d34;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:#1a7f37"></span>Last handshake 4 min ago · 18 files uploaded today</span>
+</div>
+</div>
+
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;padding:16px 18px">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Demand data used for keyword heat</div>
+<div style="display:flex;align-items:center;gap:12px;margin-top:12px;font-size:12.5px;color:#5c636e">
+<span style="padding:4px 10px;border-radius:999px;background:#171a1f;color:#fff;font-weight:600;font-size:11.5px">Shutterstock search volume</span>
+<span>refreshed weekly · 1.2 M term index</span>
+<div style="flex:1"></div>
+<span style="font-size:11.5px;color:#2f6fed;font-weight:600">Refresh now</span>
+</div>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>2 of 4 profiles enabled · strictest limit wins when several are enabled</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="2g"><div class="dv-olabel"><a class="dv-oid" href="#2g">2g</a>Screen 7 — Settings: provider, prompt, tools and local data</div>
+<div class="dv-card" style="width:1360px">
+<div data-screen-label="Settings" style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700">Sphinx</span><span style="color:#8b919c;font-size:12px">Default project</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Import</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Library</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Review <span style="color:#8b919c">12</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Queue <span style="color:#8b919c">2</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Settings</span>
+</div>
+<div style="flex:1"></div>
+<span style="font-size:12px;color:#8b919c">Saved automatically to sphinx.db</span>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="width:208px;flex:none;background:#fff;border-right:1px solid #e4e6ea;padding:14px 10px;display:flex;flex-direction:column;gap:2px">
+<span style="padding:7px 11px;border-radius:7px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">AI provider</span>
+<span style="padding:7px 11px;border-radius:7px;color:#5c636e;font-size:13px">Prompt &amp; guidance</span>
+<span style="padding:7px 11px;border-radius:7px;color:#5c636e;font-size:13px">Keyword enrichment</span>
+<span style="padding:7px 11px;border-radius:7px;color:#5c636e;font-size:13px">File embedding</span>
+<span style="padding:7px 11px;border-radius:7px;color:#5c636e;font-size:13px">Video pipeline</span>
+<span style="padding:7px 11px;border-radius:7px;color:#5c636e;font-size:13px">Storage &amp; data</span>
+<span style="padding:7px 11px;border-radius:7px;color:#5c636e;font-size:13px">Shortcuts</span>
+</div>
+
+<div style="flex:1;padding:20px 24px;overflow-y:auto;display:flex;flex-direction:column;gap:16px;max-width:900px">
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;padding:17px 18px">
+<div style="display:flex;align-items:center;gap:9px"><span style="font-size:15px;font-weight:700">AI provider</span><span style="padding:2px 8px;border-radius:5px;background:rgba(26,127,55,.13);color:#177d34;font-size:11px;font-weight:600">connected</span></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:15px">
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Provider
+<select style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;background:#fff;color:#171a1f"><option>OpenAI (GPT-4o)</option><option>Anthropic (Claude)</option><option>Local (Ollama)</option></select></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Vision model
+<select style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;background:#fff;color:#171a1f"><option>gpt-4o</option><option>gpt-4o-mini</option></select></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">API key
+<input type="password" value="sk-live-9f4c1ad0721b" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f;font-family:ui-monospace,Consolas,monospace"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">API base URL <span style="color:#b0b6be">blank = provider default</span>
+<input placeholder="proxy / gateway override" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+<button style="font:inherit;font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#2f6fed;cursor:pointer">Test request</button>
+<span style="font-size:11.5px;color:#8b919c">Key is stored locally in sphinx.db and never leaves this machine except to the provider.</span>
+</div>
+</div>
+
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;padding:17px 18px">
+<div style="font-size:15px;font-weight:700">Prompt &amp; guidance</div>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c;margin-top:14px">Project guidance <span style="color:#b0b6be">appended to every request</span>
+<textarea rows="3" style="font:inherit;font-size:13px;padding:9px 10px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f;line-height:1.5;resize:none">Fine-art nature photography. Prefer species and place names over mood words. Never invent locations. Avoid brand names.</textarea></label>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:13px">
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Keywords requested<input value="40" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Demand floor<input value="20" style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;color:#171a1f"></label>
+<label style="display:grid;gap:5px;font-size:11.5px;color:#8b919c">Tone
+<select style="font:inherit;font-size:13px;padding:7px 9px;border:1px solid #dfe2e7;border-radius:7px;background:#fff;color:#171a1f"><option>Factual</option><option>Commercial</option><option>Editorial</option></select></label>
+</div>
+</div>
+
+<div style="flex:none;background:#fff;border:1px solid #e4e6ea;border-radius:11px;overflow:hidden">
+<div style="padding:15px 18px 11px;font-size:15px;font-weight:700">Local tools</div>
+<div style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-top:1px solid #f4f5f7">
+<span style="width:8px;height:8px;border-radius:50%;background:#1a7f37"></span>
+<div style="flex:1"><div style="font-size:13px;font-weight:600">exiftool</div><div style="font-size:11.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">C:\tools\exiftool.exe · v12.76</div></div>
+<span style="font-size:12px;color:#5c636e">Change</span>
+</div>
+<div style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-top:1px solid #f4f5f7">
+<span style="width:8px;height:8px;border-radius:50%;background:#b7791f"></span>
+<div style="flex:1"><div style="font-size:13px;font-weight:600">ffmpeg <span style="color:#8a5b12;font-weight:400;font-size:11.5px">required for video</span></div><div style="font-size:11.5px;color:#8b919c">not found in PATH — video assets stay blocked</div></div>
+<button style="font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;color:#2f6fed;cursor:pointer">Locate…</button>
+</div>
+<div style="display:flex;align-items:center;gap:11px;padding:12px 18px;border-top:1px solid #f4f5f7">
+<span style="width:8px;height:8px;border-radius:50%;background:#1a7f37"></span>
+<div style="flex:1"><div style="font-size:13px;font-weight:600">sphinx.db</div><div style="font-size:11.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">%APPDATA%\Sphinx\sphinx.db · 18.2 MB · 42 assets</div></div>
+<span style="font-size:12px;color:#5c636e">Reveal</span>
+</div>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>Sphinx 0.4.2 · Tauri 2.0 · settings written on change</span>
+</div>
+</div></div></div>
+
+</div>
+<p class="dv-next">Try next: “add an upload/publish log screen as 2h” · “make the review screen work for real with keyboard nav” · “tighten the editor to fit 1280×800”</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Sphinx — today's UI, then three library directions</span></div>
+
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a"><div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Recreation of the current App.tsx / App.css — first-run state, AI vision panel open</div>
+<div class="dv-card" style="width:1120px">
+<div style="height:820px;overflow:hidden;background:#fff;color:#213547;font:16px/1.5 'Segoe UI',system-ui,sans-serif">
+<div style="max-width:960px;margin:0 auto;padding:2rem 1.5rem 3rem;height:100%;overflow-y:auto;box-sizing:border-box">
+<div><h1 style="margin:0;font-size:1.75rem;font-weight:600">Sphinx</h1>
+<p style="margin:.15rem 0 1.5rem;color:#888;font-size:.95rem">Ingestion (SPHIN-1) · Media analysis (SPHIN-2) · Metadata generation (SPHIN-3) · Metadata embedding (SPHIN-4) · Keyword enrichment (SPHIN-5) · Job orchestration (SPHIN-7) · Upload &amp; distribution (SPHIN-6) · Video pipeline (SPHIN-8)</p></div>
+
+<div style="border:2px dashed #888;border-radius:12px;padding:2.5rem 1.5rem;text-align:center">
+<p style="margin:0 0 1rem;font-size:1.05rem">Drag &amp; drop images or video</p>
+<div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap">
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #666;background:transparent;cursor:pointer;color:inherit">Choose files…</button>
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #666;background:transparent;cursor:pointer;color:inherit">Import folder…</button>
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #666;background:transparent;cursor:pointer;color:inherit">Watch folder…</button>
+</div></div>
+
+<p style="min-height:1.4em;margin:.75rem 0 .75rem;padding:.35rem .6rem;border-radius:4px;color:#666;background:#f3f3f3;font-size:.9rem">Drop images or video here, or use the buttons below.</p>
+
+<section style="margin:1.5rem 0;border:1px solid rgba(128,128,128,.3);border-radius:10px;padding:.75rem 1rem 1rem">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<h2 style="margin:.25rem 0;font-size:1.5rem;font-weight:600">AI vision <span style="color:#888;font-weight:normal">· not configured</span></h2>
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #666;background:transparent;cursor:pointer;color:inherit">Hide</button></div>
+<div style="display:grid;gap:.75rem;margin-top:.75rem">
+<label style="display:grid;gap:.25rem;font-size:.85rem;color:#888">Provider
+<select style="font:inherit;padding:.4rem .5rem;border-radius:6px;border:1px solid #666;background:transparent;color:#213547"><option>OpenAI (GPT-4o)</option></select></label>
+<label style="display:grid;gap:.25rem;font-size:.85rem;color:#888">API key
+<input type="password" placeholder="stored locally in sphinx.db" style="font:inherit;padding:.4rem .5rem;border-radius:6px;border:1px solid #666;background:transparent;color:#213547"></label>
+<label style="display:grid;gap:.25rem;font-size:.85rem;color:#888">Model <span style="color:#999;font-weight:normal">(blank = provider default)</span>
+<input type="text" placeholder="e.g. gpt-4o, gemini-1.5-pro, claude-3-5-sonnet-latest" style="font:inherit;padding:.4rem .5rem;border-radius:6px;border:1px solid #666;background:transparent;color:#213547"></label>
+<label style="display:grid;gap:.25rem;font-size:.85rem;color:#888">API base URL <span style="color:#999;font-weight:normal">(blank = provider default)</span>
+<input type="text" placeholder="proxy / gateway override" style="font:inherit;padding:.4rem .5rem;border-radius:6px;border:1px solid #666;background:transparent;color:#213547"></label>
+<label style="display:grid;gap:.25rem;font-size:.85rem;color:#888">Project prompt guidance <span style="color:#999;font-weight:normal">(optional)</span>
+<textarea rows="2" placeholder="e.g. Fine-art nature photography — prefer species names." style="font:inherit;padding:.4rem .5rem;border-radius:6px;border:1px solid #666;background:transparent;color:#213547"></textarea></label>
+<div style="display:flex;gap:.5rem;align-items:center">
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #4f8cff;background:transparent;cursor:pointer;color:#4f8cff">Save</button>
+<span style="color:#999;font-size:.85rem">Save to make OpenAI (GPT-4o) the active provider for Analyze.</span></div>
+</div></section>
+
+<sc-for list="{{ legacySections }}" as="s" hint-placeholder-count="6">
+<section style="margin:1.5rem 0;border:1px solid rgba(128,128,128,.3);border-radius:10px;padding:.75rem 1rem 1rem">
+<div style="display:flex;align-items:center;justify-content:space-between">
+<h2 style="margin:.25rem 0;font-size:1.5rem;font-weight:600">{{ s.name }} <span style="color:#888;font-weight:normal">· {{ s.meta }}</span></h2>
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #666;background:transparent;cursor:pointer;color:inherit">{{ s.action }}</button></div>
+</section>
+</sc-for>
+
+<section>
+<div style="display:flex;align-items:center;justify-content:space-between">
+<h2 style="margin:.25rem 0;font-size:1.1rem;font-weight:600">Assets <span style="color:#888;font-weight:normal">(42)</span></h2>
+<button style="font:inherit;padding:.5rem 1rem;border-radius:8px;border:1px solid #666;background:transparent;cursor:pointer;color:inherit">Export CSV…</button></div>
+<table style="width:100%;border-collapse:collapse;font-size:.85rem;margin-top:.5rem">
+<thead><tr>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Path</th>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Type</th>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Size</th>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Status</th>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Ingested</th>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Analysis</th>
+<th style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">Metadata</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{ legacyRows }}" as="r" hint-placeholder-count="4">
+<tr>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.path }}</td>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">{{ r.kind }}</td>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">{{ r.size }}</td>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">{{ r.status }}</td>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25)">{{ r.ingested }}</td>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25);white-space:nowrap"><button style="border:none;background:none;padding:.15rem .35rem;color:#4f8cff;cursor:pointer;font:inherit;font-size:.85rem">{{ r.analysisAction }}</button><button style="border:none;background:none;padding:.15rem .35rem;color:#4f8cff;cursor:pointer;font:inherit;font-size:.85rem">{{ r.analysisView }}</button></td>
+<td style="text-align:left;padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25);white-space:nowrap"><button style="border:none;background:none;padding:.15rem .35rem;color:#4f8cff;cursor:pointer;font:inherit;font-size:.85rem">{{ r.metaAction }}</button><button style="border:none;background:none;padding:.15rem .35rem;color:#888;cursor:default;font:inherit;font-size:.85rem">Embed</button><button style="border:none;background:none;padding:.15rem .35rem;color:#888;cursor:default;font:inherit;font-size:.85rem">Enrich</button><button style="border:none;background:none;padding:.15rem .35rem;color:#888;cursor:default;font:inherit;font-size:.85rem">Upload</button></td>
+</tr>
+</sc-for>
+<tr><td colspan="7" style="padding:.4rem .5rem;border-bottom:1px solid rgba(128,128,128,.25);background:rgba(128,128,128,.08)">
+<div style="display:grid;gap:.6rem;padding:.5rem .25rem">
+<p style="margin:0;font-size:.9rem">A lone Scots pine on a frost-covered ridge at first light, low mist filling the valley behind it.</p>
+<dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.3rem 1rem;margin:0">
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Scene</dt><dd style="margin:0 0 .35rem;font-size:.85rem">mountain ridge, dawn</dd></div>
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Mood</dt><dd style="margin:0 0 .35rem;font-size:.85rem">serene, isolated</dd></div>
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Subjects</dt><dd style="margin:0 0 .35rem;font-size:.85rem">pine tree, frost, mist, ridge</dd></div>
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Colors</dt><dd style="margin:0 0 .35rem;font-size:.85rem">slate blue, pale gold, white</dd></div>
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Licensing</dt><dd style="margin:0 0 .35rem;font-size:.85rem"><span style="font-size:.75rem;padding:.1rem .45rem;border-radius:5px;background:rgba(60,180,100,.18);color:#3cb464">commercial-safe</span></dd></div>
+</dl>
+<div style="display:flex;flex-wrap:wrap;gap:.3rem">
+<sc-for list="{{ legacyChips }}" as="c" hint-placeholder-count="12"><span style="font-size:.78rem;padding:.1rem .5rem;border-radius:999px;border:1px solid rgba(128,128,128,.4)">{{ c }}</span></sc-for>
+</div>
+<p style="margin:0;color:#888;font-size:.8rem">openai / gpt-4o · 34 keywords</p>
+<dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.3rem 1rem;margin:0">
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Title</dt><dd style="margin:0 0 .35rem;font-size:.85rem">Lone Scots pine on a frosted ridge at sunrise with valley mist</dd></div>
+<div><dt style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:#999">Description</dt><dd style="margin:0 0 .35rem;font-size:.85rem">A single Scots pine stands on a frost-covered mountain ridge at dawn, mist filling the valley below.</dd></div>
+</dl>
+<p style="margin:0;color:#888;font-size:.8rem">Shutterstock profile · 34 keywords</p>
+</div></td></tr>
+</tbody></table>
+</section>
+</div></div></div></div>
+
+<div class="dv-opt" id="1b"><div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Pipeline — light, stage-first grid with a compliance inspector</div>
+<div class="dv-card" style="width:1360px">
+<div style="height:850px;display:flex;flex-direction:column;background:#f6f7f9;color:#171a1f;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+
+<div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:46px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:700;letter-spacing:.02em">Sphinx</span><span style="color:#8b919c;font-size:12px">Default project</span></div>
+<div style="width:1px;height:20px;background:#e4e6ea"></div>
+<div style="display:flex;gap:2px">
+<span style="padding:5px 10px;border-radius:6px;background:#eef2fb;color:#2f6fed;font-size:13px;font-weight:600">Library</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Queue <span style="color:#8b919c">2</span></span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Sites</span>
+<span style="padding:5px 10px;border-radius:6px;color:#5c636e;font-size:13px">Settings</span>
+</div>
+<div style="flex:1"></div>
+<div style="display:flex;align-items:center;gap:8px;color:#5c636e;font-size:12px">
+<span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#1a7f37"></span>OpenAI GPT-4o</span>
+<span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#1a7f37"></span>exiftool 12.76</span>
+<span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#b7791f"></span>ffmpeg missing</span>
+</div>
+<button style="font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Import…</button>
+</div>
+
+<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#fff;border-bottom:1px solid #e4e6ea;flex:none">
+<div style="display:flex;align-items:center;gap:7px;padding:6px 10px;width:250px;border:1px solid #dfe2e7;border-radius:7px;color:#8b919c;font-size:13px"><span style="font-size:12px">⌕</span>Search title, keyword, path</div>
+<div style="display:flex;gap:6px">
+<span style="padding:5px 11px;border-radius:999px;background:#171a1f;color:#fff;font-size:12px;font-weight:600">All 42</span>
+<span style="padding:5px 11px;border-radius:999px;background:#fff;border:1px solid #dfe2e7;color:#5c636e;font-size:12px">Needs review 12</span>
+<span style="padding:5px 11px;border-radius:999px;background:#fff;border:1px solid #dfe2e7;color:#5c636e;font-size:12px">Ready 18</span>
+<span style="padding:5px 11px;border-radius:999px;background:#fff;border:1px solid #dfe2e7;color:#5c636e;font-size:12px">Failed 2</span>
+</div>
+<div style="flex:1"></div>
+<span style="color:#8b919c;font-size:12px">Target</span>
+<div style="display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #dfe2e7;border-radius:7px;font-size:13px">Shutterstock <span style="color:#8b919c;font-size:11px">▾</span></div>
+<div style="display:flex;border:1px solid #dfe2e7;border-radius:7px;overflow:hidden">
+<span style="padding:5px 10px;background:#f0f2f5;font-size:12px;font-weight:600">Grid</span>
+<span style="padding:5px 10px;color:#5c636e;font-size:12px">List</span>
+</div>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="flex:1;padding:16px;overflow-y:auto">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+<span style="font-size:12px;color:#5c636e"><b style="color:#171a1f">3 selected</b> · 42 assets in Default project</span>
+<div style="display:flex;gap:6px">
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Analyze</button>
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Generate metadata</button>
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Embed</button>
+<button style="font:inherit;font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Upload</button>
+</div></div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+<sc-for list="{{ assets }}" as="a" hint-placeholder-count="9">
+<div style="background:#fff;border:1px solid {{ a.cardBorder }};border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(20,24,32,.05)">
+<div style="height:112px;background:linear-gradient(135deg,{{ a.c1 }},{{ a.c2 }});position:relative">
+<span style="position:absolute;top:8px;left:8px;padding:2px 6px;border-radius:5px;background:rgba(10,14,20,.55);color:#fff;font-size:10px;font-weight:600;letter-spacing:.03em;text-transform:uppercase">{{ a.kind }}</span>
+<span style="position:absolute;top:8px;right:8px;padding:2px 6px;border-radius:5px;background:{{ a.flagBg }};color:{{ a.flagFg }};font-size:10px;font-weight:600">{{ a.flag }}</span>
+</div>
+<div style="padding:9px 10px 11px;display:flex;flex-direction:column;gap:7px">
+<div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.name }}</div>
+<div style="font-size:11.5px;color:#5c636e;line-height:1.35;height:31px;overflow:hidden">{{ a.title }}</div>
+<div style="display:flex;align-items:center;gap:8px">
+<div style="display:flex;align-items:center;gap:4px">
+<sc-for list="{{ a.dots }}" as="d" hint-placeholder-count="5"><span title="{{ d.label }}" style="width:7px;height:7px;border-radius:50%;background:{{ d.bg }}"></span></sc-for>
+</div>
+<span style="font-size:11px;color:#8b919c">{{ a.stageLabel }}</span>
+<div style="flex:1"></div>
+<span style="font-size:11px;color:#8b919c">{{ a.kwCount }} kw</span>
+</div>
+</div></div>
+</sc-for>
+</div>
+</div>
+
+<div style="width:392px;flex:none;background:#fff;border-left:1px solid #e4e6ea;display:flex;flex-direction:column;min-height:0">
+<div style="padding:14px 16px 12px;border-bottom:1px solid #eef0f3;flex:none">
+<div style="display:flex;gap:12px">
+<div style="width:96px;height:64px;border-radius:8px;background:linear-gradient(135deg,#7d94b8,#e3d3b0);flex:none"></div>
+<div style="min-width:0">
+<div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ridge-pine-dawn-0412.jpg</div>
+<div style="font-size:11.5px;color:#8b919c;margin-top:2px">JPEG · 8.4 MB · 6000×4000</div>
+<div style="font-size:11px;color:#8b919c;font-family:ui-monospace,Consolas,monospace;margin-top:4px">b3:9f4c1a…d072</div>
+<div style="display:flex;gap:5px;margin-top:7px">
+<span style="padding:2px 7px;border-radius:5px;background:rgba(26,127,55,.12);color:#1a7f37;font-size:10.5px;font-weight:600">commercial-safe</span>
+<span style="padding:2px 7px;border-radius:5px;background:#f0f2f5;color:#5c636e;font-size:10.5px">gpt-4o</span>
+</div>
+</div></div></div>
+
+<div style="flex:1;overflow-y:auto;padding:14px 16px 0">
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Title</span>
+<span style="font-size:11px;color:#5c636e;font-family:ui-monospace,Consolas,monospace">62 / 200</span></div>
+<div style="padding:8px 10px;border:1px solid #dfe2e7;border-radius:7px;font-size:13px;line-height:1.4">Lone Scots pine on a frosted ridge at sunrise with valley mist</div>
+
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin:14px 0 5px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Description</span>
+<span style="font-size:11px;color:#5c636e;font-family:ui-monospace,Consolas,monospace">99 / 200</span></div>
+<div style="padding:8px 10px;border:1px solid #dfe2e7;border-radius:7px;font-size:12.5px;line-height:1.45;color:#3d434c">A single Scots pine stands on a frost-covered mountain ridge at dawn, mist filling the valley below.</div>
+
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin:16px 0 7px">
+<span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Keywords <span style="color:#171a1f">34</span></span>
+<span style="font-size:11.5px;color:#2f6fed;font-weight:600">Enrich +</span></div>
+<div style="display:flex;flex-wrap:wrap;gap:5px">
+<sc-for list="{{ inspectorKeywords }}" as="k" hint-placeholder-count="18">
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;border:1px solid {{ k.bd }};background:{{ k.bg }};font-size:11.5px;color:#171a1f">{{ k.word }}<span style="font-size:9.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace">{{ k.score }}</span></span>
+</sc-for>
+<span style="padding:3px 9px;border-radius:999px;border:1px dashed #c9ced6;color:#8b919c;font-size:11.5px">+ add</span>
+</div>
+
+<div style="margin:18px 0 7px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b919c">Site compliance</div>
+<div style="border:1px solid #e4e6ea;border-radius:8px;overflow:hidden">
+<sc-for list="{{ compliance }}" as="s" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid #eef0f3">
+<span style="width:8px;height:8px;border-radius:50%;background:{{ s.dot }};flex:none"></span>
+<span style="font-size:12px;font-weight:600;width:96px;flex:none">{{ s.site }}</span>
+<div style="flex:1;display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;justify-content:space-between;font-size:10.5px;color:#8b919c;font-family:ui-monospace,Consolas,monospace"><span>title {{ s.title }}</span><span>kw {{ s.kw }}</span></div>
+<div style="height:3px;border-radius:2px;background:#eef0f3;overflow:hidden"><div style="height:3px;width:{{ s.pct }};background:{{ s.dot }}"></div></div>
+</div>
+<span style="font-size:10.5px;font-weight:600;color:{{ s.dot }};width:52px;text-align:right">{{ s.verdict }}</span>
+</div>
+</sc-for>
+</div>
+<div style="height:14px"></div>
+</div>
+
+<div style="padding:12px 16px;border-top:1px solid #eef0f3;display:flex;gap:8px;flex:none">
+<button style="flex:1;font:inherit;font-size:13px;font-weight:600;padding:8px;border-radius:7px;border:none;background:#2f6fed;color:#fff;cursor:pointer">Approve &amp; embed</button>
+<button style="font:inherit;font-size:13px;padding:8px 12px;border-radius:7px;border:1px solid #dfe2e7;background:#fff;cursor:pointer;color:#171a1f">Regenerate</button>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-top:1px solid #e4e6ea;color:#8b919c;font-size:11px">
+<span>Watching D:\Photos\2026-08 — 2 new files</span><span>·</span><span>Queue: 2 running · 5 pending</span><span>·</span><span>sphinx.db 18.2 MB</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="1c"><div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Studio — dark review room; keyword heat and image-region hotspots</div>
+<div class="dv-card" style="width:1360px">
+<div style="height:850px;display:flex;flex-direction:column;background:#0f1115;color:#e7eaef;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+
+<div style="display:flex;align-items:center;gap:14px;padding:0 16px;height:44px;background:#14171d;border-bottom:1px solid #23272f;flex:none">
+<span style="font-weight:700;letter-spacing:.14em;font-size:12px;text-transform:uppercase;color:#c8cee0">Sphinx</span>
+<span style="color:#6d7686;font-size:12px">Default project · 42 assets</span>
+<div style="flex:1"></div>
+<div style="display:flex;gap:14px;color:#6d7686;font-size:12px">
+<span>Reviewing <b style="color:#e7eaef">12</b></span><span>Ready <b style="color:#e7eaef">18</b></span><span>Failed <b style="color:#e2665a">2</b></span>
+</div>
+<div style="width:1px;height:18px;background:#23272f"></div>
+<span style="color:#6d7686;font-size:12px">gpt-4o · Shutterstock profile</span>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="width:212px;flex:none;background:#12151a;border-right:1px solid #23272f;overflow-y:auto;padding:10px 8px">
+<div style="padding:4px 8px 8px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5d6675">Review queue</div>
+<sc-for list="{{ assets }}" as="a" hint-placeholder-count="9">
+<div style="display:flex;gap:9px;padding:7px;border-radius:8px;background:{{ a.railBg }};margin-bottom:3px">
+<div style="width:48px;height:34px;border-radius:5px;background:linear-gradient(135deg,{{ a.c1 }},{{ a.c2 }});flex:none"></div>
+<div style="min-width:0;flex:1">
+<div style="font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#dfe4ec">{{ a.name }}</div>
+<div style="display:flex;align-items:center;gap:4px;margin-top:5px">
+<sc-for list="{{ a.darkDots }}" as="d" hint-placeholder-count="5"><span style="width:5px;height:5px;border-radius:50%;background:{{ d.bg }}"></span></sc-for>
+<span style="font-size:10px;color:#6d7686;margin-left:2px">{{ a.kwCount }} kw</span>
+</div></div></div>
+</sc-for>
+</div>
+
+<div style="flex:1;display:flex;flex-direction:column;min-width:0;background:#0f1115">
+<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:22px;min-height:0">
+<div style="position:relative;width:100%;max-width:660px;aspect-ratio:3/2;border-radius:12px;background:linear-gradient(160deg,#7d94b8 0%,#a9b6c4 42%,#e3d3b0 100%);box-shadow:0 18px 44px rgba(0,0,0,.45)">
+<div style="position:absolute;left:11%;top:18%;width:22%;height:56%;border:2px solid rgba(255,255,255,.92);border-radius:6px;box-shadow:0 0 0 9999px rgba(8,10,14,.34)">
+<span style="position:absolute;top:-11px;left:-2px;padding:2px 6px;border-radius:4px;background:#fff;color:#14171d;font-size:10px;font-weight:700">scots pine</span></div>
+<div style="position:absolute;right:9%;bottom:16%;width:30%;height:22%;border:1.5px dashed rgba(255,255,255,.75);border-radius:6px">
+<span style="position:absolute;bottom:-11px;right:-2px;padding:2px 6px;border-radius:4px;background:rgba(20,23,29,.85);color:#dfe4ec;font-size:10px;font-weight:600">valley mist</span></div>
+<span style="position:absolute;bottom:10px;left:12px;padding:3px 8px;border-radius:5px;background:rgba(10,12,16,.6);color:#c8cee0;font-size:11px">ridge-pine-dawn-0412.jpg · 6000×4000</span>
+</div></div>
+<div style="height:70px;flex:none;border-top:1px solid #23272f;background:#12151a;display:flex;align-items:center;gap:10px;padding:0 16px">
+<span style="font-size:11px;color:#6d7686;width:74px">Region map</span>
+<div style="flex:1;display:flex;gap:8px">
+<sc-for list="{{ regions }}" as="r" hint-placeholder-count="5">
+<div style="flex:1;padding:7px 9px;border-radius:7px;background:{{ r.bg }};border:1px solid {{ r.bd }}">
+<div style="font-size:11.5px;font-weight:600;color:#dfe4ec">{{ r.label }}</div>
+<div style="font-size:10px;color:#6d7686;margin-top:2px">{{ r.detail }}</div>
+</div>
+</sc-for>
+</div></div>
+</div>
+
+<div style="width:404px;flex:none;background:#14171d;border-left:1px solid #23272f;display:flex;flex-direction:column;min-height:0">
+<div style="padding:14px 16px 0;flex:1;overflow-y:auto">
+<div style="display:flex;align-items:baseline;justify-content:space-between">
+<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5d6675">Title</span>
+<span style="font-size:11px;color:#6d7686;font-family:ui-monospace,Consolas,monospace">62 / 200</span></div>
+<div style="margin-top:6px;padding:9px 11px;border:1px solid #2b303a;border-radius:8px;background:#101318;font-size:13px;line-height:1.4;color:#e7eaef">Lone Scots pine on a frosted ridge at sunrise with valley mist</div>
+
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:15px">
+<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5d6675">Description</span>
+<span style="font-size:11px;color:#6d7686;font-family:ui-monospace,Consolas,monospace">99 / 200</span></div>
+<div style="margin-top:6px;padding:9px 11px;border:1px solid #2b303a;border-radius:8px;background:#101318;font-size:12.5px;line-height:1.45;color:#b9c1cf">A single Scots pine stands on a frost-covered mountain ridge at dawn, mist filling the valley below.</div>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px">
+<span style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5d6675">Keyword heat <span style="color:#e7eaef">34</span></span>
+<div style="display:flex;gap:5px;align-items:center;font-size:10px;color:#6d7686">
+<span>low</span><span style="width:56px;height:5px;border-radius:3px;background:linear-gradient(90deg,#33445c,#4f7fb8,#d99a4e,#e2683c)"></span><span>high</span>
+</div></div>
+<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:9px">
+<sc-for list="{{ heatKeywords }}" as="k" hint-placeholder-count="20">
+<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:7px;background:{{ k.bg }};border:1px solid {{ k.bd }};font-size:{{ k.size }};color:{{ k.fg }};font-weight:600">{{ k.word }}<span style="font-size:9.5px;font-weight:500;opacity:.72;font-family:ui-monospace,Consolas,monospace">{{ k.score }}</span></span>
+</sc-for>
+</div>
+<div style="margin-top:10px;padding:9px 11px;border-radius:8px;background:#101318;border:1px solid #2b303a">
+<div style="font-size:11px;font-weight:700;color:#dfe4ec">Why “frost” scores 91</div>
+<div style="display:grid;gap:3px;margin-top:6px;font-size:10.5px;color:#8a93a3">
+<div style="display:flex;justify-content:space-between"><span>Model confidence</span><span style="color:#c8cee0;font-family:ui-monospace,Consolas,monospace">0.94</span></div>
+<div style="display:flex;justify-content:space-between"><span>Shutterstock results</span><span style="color:#c8cee0;font-family:ui-monospace,Consolas,monospace">412k</span></div>
+<div style="display:flex;justify-content:space-between"><span>Adobe Stock results</span><span style="color:#c8cee0;font-family:ui-monospace,Consolas,monospace">288k</span></div>
+<div style="display:flex;justify-content:space-between"><span>Source region</span><span style="color:#c8cee0">foreground branch</span></div>
+</div></div>
+
+<div style="margin-top:16px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5d6675">Rejected by site rules</div>
+<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
+<sc-for list="{{ rejected }}" as="r" hint-placeholder-count="3">
+<span style="padding:3px 8px;border-radius:7px;background:rgba(226,102,90,.12);border:1px solid rgba(226,102,90,.35);color:#e2665a;font-size:11px;text-decoration:line-through">{{ r.word }}</span>
+</sc-for>
+<span style="font-size:10.5px;color:#6d7686;align-self:center">trademark / banned-term list</span>
+</div>
+<div style="height:16px"></div>
+</div>
+<div style="padding:12px 16px;border-top:1px solid #23272f;display:flex;gap:8px;flex:none;align-items:center">
+<span style="font-size:10.5px;color:#6d7686;font-family:ui-monospace,Consolas,monospace">A approve · R reject · ⌘↵ embed</span>
+<div style="flex:1"></div>
+<button style="font:inherit;font-size:12.5px;padding:7px 12px;border-radius:7px;border:1px solid #2b303a;background:#1a1e26;color:#c8cee0;cursor:pointer">Reject</button>
+<button style="font:inherit;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:7px;border:none;background:#4f8cff;color:#08101f;cursor:pointer">Approve</button>
+</div>
+</div></div>
+
+<div style="height:26px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;background:#12151a;border-top:1px solid #23272f;color:#5d6675;font-size:11px">
+<span>Asset 7 of 42</span><span>·</span><span>Queue: 2 running</span><span>·</span><span>exiftool 12.76 · ffmpeg not found</span>
+</div>
+</div></div></div>
+
+<div class="dv-opt" id="1d"><div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Heat Bench — the bold one: live keyword-heat prototype with a demand floor (drag the slider, click chips)</div>
+<div class="dv-card" style="width:1360px">
+<div style="height:850px;display:flex;flex-direction:column;background:#f3f1ec;color:#141311;font:14px/1.45 'Segoe UI',system-ui,sans-serif;overflow:hidden">
+
+<div style="display:flex;align-items:center;gap:16px;padding:0 20px;height:52px;background:#141311;color:#f3f1ec;flex:none">
+<span style="font-weight:700;font-size:15px;letter-spacing:.01em">Sphinx</span>
+<span style="padding:3px 9px;border-radius:999px;background:rgba(243,241,236,.14);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase">Heat bench</span>
+<div style="flex:1"></div>
+<span style="font-size:12px;color:rgba(243,241,236,.62)">ridge-pine-dawn-0412.jpg · asset 7 / 42</span>
+<div style="display:flex;gap:6px">
+<button style="font:inherit;font-size:12.5px;padding:6px 12px;border-radius:6px;border:1px solid rgba(243,241,236,.28);background:transparent;color:#f3f1ec;cursor:pointer">Skip</button>
+<button style="font:inherit;font-size:12.5px;font-weight:700;padding:6px 14px;border-radius:6px;border:none;background:#d9622b;color:#fff;cursor:pointer">Commit set</button>
+</div>
+</div>
+
+<div style="flex:1;display:flex;min-height:0">
+<div style="flex:1;display:flex;flex-direction:column;padding:20px;gap:16px;min-width:0">
+<div style="display:flex;gap:18px;align-items:flex-start">
+<div style="width:296px;height:198px;border-radius:10px;background:linear-gradient(160deg,#7d94b8 0%,#a9b6c4 44%,#e3d3b0 100%);flex:none;box-shadow:0 8px 22px rgba(20,19,17,.16)"></div>
+<div style="flex:1;min-width:0">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a8479">Generated title</div>
+<div style="font-size:22px;line-height:1.25;font-weight:600;margin-top:6px;letter-spacing:-.01em;text-wrap:pretty">Lone Scots pine on a frosted ridge at sunrise with valley mist</div>
+<div style="font-size:12.5px;color:#5f5a51;margin-top:9px;line-height:1.5;text-wrap:pretty">A single Scots pine stands on a frost-covered mountain ridge at dawn, mist filling the valley below.</div>
+<div style="display:flex;gap:16px;margin-top:14px">
+<sc-for list="{{ meters }}" as="m" hint-placeholder-count="3">
+<div style="flex:1">
+<div style="display:flex;justify-content:space-between;font-size:10.5px;color:#8a8479;font-family:ui-monospace,Consolas,monospace"><span>{{ m.site }}</span><span>{{ m.value }}</span></div>
+<div style="height:5px;border-radius:3px;background:#e2ded5;margin-top:5px;overflow:hidden"><div style="height:5px;width:{{ m.pct }};background:{{ m.color }}"></div></div>
+</div>
+</sc-for>
+</div>
+</div></div>
+
+<div style="flex:1;display:flex;flex-direction:column;background:#fbfaf7;border:1px solid #e2ded5;border-radius:12px;padding:15px 16px;min-height:0">
+<div style="display:flex;align-items:center;gap:12px;flex:none">
+<span style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#8a8479">Keyword field</span>
+<span style="font-size:12px;color:#5f5a51">{{ keptLabel }}</span>
+<div style="flex:1"></div>
+<span style="font-size:11px;color:#8a8479">Demand floor</span>
+<input type="range" min="0" max="95" value="{{ floor }}" onInput="{{ onFloor }}" style="width:170px;accent-color:#d9622b">
+<span style="font-size:12px;font-weight:700;font-family:ui-monospace,Consolas,monospace;width:26px;text-align:right">{{ floor }}</span>
+</div>
+<div style="flex:1;overflow-y:auto;margin-top:12px;display:flex;flex-wrap:wrap;gap:7px;align-content:flex-start">
+<sc-for list="{{ benchKeywords }}" as="k" hint-placeholder-count="34">
+<span onClick="{{ k.onToggle }}" style="display:inline-flex;align-items:baseline;gap:7px;padding:{{ k.pad }};border-radius:8px;background:{{ k.bg }};border:1px solid {{ k.bd }};color:{{ k.fg }};font-size:{{ k.size }};font-weight:600;opacity:{{ k.opacity }};cursor:pointer;text-decoration:{{ k.strike }}">{{ k.word }}<span style="font-size:10px;font-weight:500;opacity:.7;font-family:ui-monospace,Consolas,monospace">{{ k.score }}</span></span>
+</sc-for>
+</div>
+<div style="flex:none;display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid #eae6de;margin-top:12px;font-size:11px;color:#8a8479">
+<span style="display:flex;align-items:center;gap:6px">chip size = blended demand<span style="width:52px;height:5px;border-radius:3px;background:linear-gradient(90deg,#cfd6dd,#e8b27a,#d9622b)"></span></span>
+<span>·</span><span>click a chip to drop it from the set</span><span>·</span><span>dimmed = below the floor, excluded on commit</span>
+</div>
+</div>
+</div>
+
+<div style="width:340px;flex:none;background:#fff;border-left:1px solid #e2ded5;display:flex;flex-direction:column;min-height:0">
+<div style="padding:16px;flex:1;overflow-y:auto">
+<div style="font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a8479">Set health</div>
+<div style="display:flex;gap:10px;margin-top:10px">
+<div style="flex:1;padding:11px;border-radius:9px;background:#f7f5f0"><div style="font-size:24px;font-weight:700;letter-spacing:-.02em">{{ keptCount }}</div><div style="font-size:10.5px;color:#8a8479;margin-top:2px">keywords kept</div></div>
+<div style="flex:1;padding:11px;border-radius:9px;background:#f7f5f0"><div style="font-size:24px;font-weight:700;letter-spacing:-.02em">{{ avgHeat }}</div><div style="font-size:10.5px;color:#8a8479;margin-top:2px">avg heat</div></div>
+</div>
+<div style="margin-top:10px;padding:10px 12px;border-radius:9px;background:{{ verdictBg }};border:1px solid {{ verdictBd }};font-size:12px;color:{{ verdictFg }};font-weight:600">{{ verdictText }}</div>
+
+<div style="margin-top:18px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a8479">Provenance</div>
+<div style="display:grid;gap:6px;margin-top:9px;font-size:11.5px;color:#5f5a51">
+<div style="display:flex;justify-content:space-between"><span>Vision model</span><span style="color:#141311;font-family:ui-monospace,Consolas,monospace">gpt-4o</span></div>
+<div style="display:flex;justify-content:space-between"><span>Prompt</span><span style="color:#141311">structured v2 + project line</span></div>
+<div style="display:flex;justify-content:space-between"><span>Validated against</span><span style="color:#141311">Shutterstock, Adobe</span></div>
+<div style="display:flex;justify-content:space-between"><span>Limiter profile</span><span style="color:#141311">Shutterstock</span></div>
+</div>
+
+<div style="margin-top:18px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a8479">AI vs. your edit</div>
+<div style="margin-top:9px;border:1px solid #e2ded5;border-radius:9px;overflow:hidden;font-size:11.5px">
+<div style="padding:8px 10px;background:#fdf6f2;border-bottom:1px solid #f1e6df"><span style="color:#a8503b;font-weight:600">− </span><span style="color:#5f5a51">“scenic wilderness landscape backdrop”</span></div>
+<div style="padding:8px 10px;background:#f2f8f3"><span style="color:#2f7a4a;font-weight:600">+ </span><span style="color:#141311">“scots pine frost ridge sunrise”</span></div>
+</div>
+
+<div style="margin-top:18px;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a8479">Dropped</div>
+<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:9px">
+<sc-for list="{{ droppedWords }}" as="d" hint-placeholder-count="3">
+<span style="padding:3px 8px;border-radius:7px;background:#f4f1ec;border:1px dashed #d5cfc4;color:#8a8479;font-size:11px;text-decoration:line-through">{{ d }}</span>
+</sc-for>
+</div>
+</div>
+<div style="padding:13px 16px;border-top:1px solid #eae6de;flex:none;display:flex;gap:8px">
+<button style="flex:1;font:inherit;font-size:13px;font-weight:700;padding:9px;border-radius:7px;border:none;background:#141311;color:#f3f1ec;cursor:pointer">Commit &amp; next →</button>
+</div>
+</div></div>
+
+<div style="height:28px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;background:#eae6de;color:#757066;font-size:11px">
+<span>12 assets awaiting review</span><span>·</span><span>heat = 0.5·model confidence + 0.5·site demand, normalised</span><span>·</span><span>J / K to move, space to commit</span>
+</div>
+</div></div></div>
+
+</div>
+<p class="dv-next">Try next: “build out <a class="dv-oid" href="#1b">1b</a> for all seven screens” · “put <a class="dv-oid" href="#1d">1d</a>’s heat field inside <a class="dv-oid" href="#1c">1c</a>’s dark shell” · “show the per-site tabs variant of multi-site publishing”</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1460,&quot;height&quot;:1000}}">
+const STAGES = ["Analyze", "Generate", "Enrich", "Embed", "Upload"];
+const HEAT = [
+  ["frost", 91], ["scots pine", 88], ["mountain ridge", 84], ["sunrise", 82], ["valley mist", 79],
+  ["dawn light", 77], ["conifer", 74], ["highlands", 71], ["winter", 69], ["solitude", 66],
+  ["cold morning", 63], ["evergreen", 61], ["alpine", 58], ["hoarfrost", 55], ["golden hour", 53],
+  ["wilderness", 50], ["treeline", 47], ["scotland", 44], ["silhouette", 41], ["subzero", 38],
+  ["low cloud", 36], ["rugged terrain", 33], ["nobody", 30], ["tranquil", 28], ["crisp air", 25],
+  ["moorland", 22], ["boreal", 19], ["escarpment", 16], ["windswept", 13], ["backcountry", 10],
+  ["hillwalking", 8], ["panorama", 6], ["copy space", 4], ["natural beauty", 2],
+];
+const ASSETS = [
+  { name: "ridge-pine-dawn-0412.jpg", kind: "image", stage: 3, kw: 34, c1: "#7d94b8", c2: "#e3d3b0", title: "Lone Scots pine on a frosted ridge at sunrise with valley mist", flag: "review", sel: true },
+  { name: "harbour-nets-0398.jpg", kind: "image", stage: 5, kw: 41, c1: "#2f6f7a", c2: "#c9d8c5", title: "Coiled fishing nets on a stone harbour wall at low tide", flag: "ready" },
+  { name: "market-spices-b02.jpg", kind: "image", stage: 5, kw: 38, c1: "#b8622f", c2: "#e8c98a", title: "Open sacks of ground spices at a covered market stall", flag: "ready" },
+  { name: "cliff-path-timelapse.mp4", kind: "video", stage: 1, kw: 0, c1: "#3d4a63", c2: "#8fa0b5", title: "Waiting on ffmpeg — keyframe extraction unavailable", flag: "blocked" },
+  { name: "studio-ceramics-114.jpg", kind: "image", stage: 4, kw: 29, c1: "#8c7f74", c2: "#efe6da", title: "Unglazed stoneware bowls drying on a workshop shelf", flag: "review", sel: true },
+  { name: "commuters-rain-77.jpg", kind: "image", stage: 2, kw: 22, c1: "#2b303c", c2: "#7b8899", title: "Commuters with umbrellas crossing a wet city street at dusk", flag: "editorial" },
+  { name: "wheat-field-drone-05.jpg", kind: "image", stage: 5, kw: 36, c1: "#a8912f", c2: "#f0e2ae", title: "Aerial view of harvest tracks cut through a wheat field", flag: "ready", sel: true },
+  { name: "cafe-window-light.jpg", kind: "image", stage: 3, kw: 31, c1: "#6b5b4a", c2: "#e5d6bd", title: "Morning light across an empty café table and folded paper", flag: "review" },
+  { name: "glacier-ice-close.jpg", kind: "image", stage: 0, kw: 0, c1: "#4b7f9c", c2: "#dbeaf2", title: "Not analyzed yet", flag: "new" },
+];
+const FLAG = {
+  review: ["rgba(47,111,237,.14)", "#2f6fed"], ready: ["rgba(26,127,55,.15)", "#177d34"],
+  blocked: ["rgba(183,121,31,.16)", "#8a5b12"], editorial: ["rgba(140,90,200,.16)", "#6d43a8"],
+  new: ["rgba(255,255,255,.72)", "#5c636e"],
+};
+
+class Component extends DCLogic {
+  state = { floor: 20, dropped: {} };
+
+  heatColor(score, dark) {
+    const t = score / 100;
+    if (dark) {
+      if (t > .78) return ["rgba(226,104,60,.20)", "rgba(226,104,60,.55)", "#f0a075"];
+      if (t > .55) return ["rgba(217,154,78,.16)", "rgba(217,154,78,.42)", "#e0bb86"];
+      if (t > .32) return ["rgba(79,127,184,.16)", "rgba(79,127,184,.4)", "#9dbde0"];
+      return ["rgba(51,68,92,.28)", "rgba(90,104,126,.34)", "#8a93a3"];
+    }
+    if (t > .78) return ["rgba(217,98,43,.14)", "rgba(217,98,43,.42)", "#8f3d16"];
+    if (t > .55) return ["rgba(232,178,122,.20)", "rgba(211,155,96,.42)", "#7a4f21"];
+    if (t > .32) return ["rgba(207,214,221,.5)", "rgba(180,190,201,.6)", "#3d434c"];
+    return ["#f4f2ee", "#e0dcd3", "#5f5a51"];
+  }
+
+  renderVals() {
+    const floor = this.state.floor;
+    const dropped = this.state.dropped;
+
+    const assets = ASSETS.map((a) => {
+      const [flagBg, flagFg] = FLAG[a.flag];
+      const mk = (onCol, offCol) => STAGES.map((label, i) => ({ label, bg: i < a.stage ? onCol : offCol }));
+      return {
+        ...a,
+        kwCount: a.kw || "—",
+        stageLabel: a.stage === 0 ? "new" : a.stage === 5 ? "uploaded" : STAGES[a.stage],
+        dots: mk(a.flag === "blocked" ? "#c08a2a" : "#2f6fed", "#dfe2e7"),
+        darkDots: mk(a.flag === "blocked" ? "#c08a2a" : "#4f8cff", "#2b303a"),
+        cardBorder: a.sel ? "#2f6fed" : "#e4e6ea",
+        railBg: a.sel && a.stage === 3 ? "#1c2230" : "transparent",
+        flagBg, flagFg,
+      };
+    });
+
+    const inspectorKeywords = HEAT.slice(0, 18).map(([word, score]) => {
+      const [bg, bd] = this.heatColor(score, false);
+      return { word, score, bg, bd };
+    });
+
+    const heatKeywords = HEAT.slice(0, 22).map(([word, score]) => {
+      const [bg, bd, fg] = this.heatColor(score, true);
+      return { word, score, bg, bd, fg, size: score > 78 ? "13px" : score > 50 ? "12px" : "11px" };
+    });
+
+    const benchKeywords = HEAT.map(([word, score]) => {
+      const [bg, bd, fg] = this.heatColor(score, false);
+      const off = dropped[word] || score < floor;
+      return {
+        word, score, bg, bd, fg,
+        size: score > 78 ? "15px" : score > 55 ? "13.5px" : score > 32 ? "12.5px" : "11.5px",
+        pad: score > 78 ? "6px 12px" : score > 55 ? "5px 10px" : "4px 9px",
+        opacity: off ? 0.34 : 1,
+        strike: dropped[word] ? "line-through" : "none",
+        onToggle: () => this.setState((s) => ({ dropped: { ...s.dropped, [word]: !s.dropped[word] } })),
+      };
+    });
+
+    const kept = HEAT.filter(([w, s]) => !dropped[w] && s >= floor);
+    const keptCount = kept.length;
+    const avgHeat = keptCount ? Math.round(kept.reduce((n, [, s]) => n + s, 0) / keptCount) : 0;
+    const verdict = keptCount < 7
+      ? ["rgba(179,38,30,.08)", "rgba(179,38,30,.3)", "#8f2019", `Below Shutterstock minimum — need ${7 - keptCount} more`]
+      : keptCount > 50
+        ? ["rgba(183,121,31,.1)", "rgba(183,121,31,.32)", "#8a5b12", "Over 50 keywords — Shutterstock will truncate"]
+        : ["rgba(26,127,55,.09)", "rgba(26,127,55,.28)", "#1a7f37", `Valid for Shutterstock, Adobe Stock and Getty`];
+
+    return {
+      assets, inspectorKeywords, heatKeywords, benchKeywords,
+      floor, keptCount, avgHeat,
+      keptLabel: `${keptCount} of 34 kept · ${34 - keptCount} below floor or dropped`,
+      verdictBg: verdict[0], verdictBd: verdict[1], verdictFg: verdict[2], verdictText: verdict[3],
+      droppedWords: Object.keys(dropped).filter((w) => dropped[w]).slice(0, 8),
+      onFloor: (e) => this.setState({ floor: Number(e.target.value) }),
+
+      meters: [
+        { site: "Shutterstock title", value: "62/200", pct: "31%", color: "#1a7f37" },
+        { site: "Adobe title", value: "62/70", pct: "89%", color: "#b7791f" },
+        { site: "Getty keywords", value: "34/50", pct: "68%", color: "#1a7f37" },
+      ],
+      compliance: [
+        { site: "Shutterstock", title: "62/200", kw: "34/50", pct: "31%", dot: "#1a7f37", verdict: "pass" },
+        { site: "Adobe Stock", title: "62/70", kw: "34/49", pct: "89%", dot: "#b7791f", verdict: "tight" },
+        { site: "Getty", title: "62/120", kw: "34/50", pct: "52%", dot: "#1a7f37", verdict: "pass" },
+        { site: "Alamy", title: "62/150", kw: "34/50", pct: "41%", dot: "#1a7f37", verdict: "pass" },
+      ],
+      regions: [
+        { label: "scots pine", detail: "conf .94 · 3 keywords", bg: "rgba(79,140,255,.14)", bd: "rgba(79,140,255,.4)" },
+        { label: "frosted rock", detail: "conf .88 · 4 keywords", bg: "#181c23", bd: "#2b303a" },
+        { label: "valley mist", detail: "conf .81 · 2 keywords", bg: "#181c23", bd: "#2b303a" },
+        { label: "sky gradient", detail: "conf .76 · 3 keywords", bg: "#181c23", bd: "#2b303a" },
+        { label: "foreground grass", detail: "conf .62 · 1 keyword", bg: "#181c23", bd: "#2b303a" },
+      ],
+      rejected: [{ word: "gore-tex" }, { word: "instagrammable" }, { word: "national trust" }],
+      legacySections: [
+        { name: "Metadata limits", meta: "Shutterstock", action: "Configure" },
+        { name: "File embedding", meta: "exiftool found (v12.76)", action: "Configure" },
+        { name: "Video pipeline", meta: "ffmpeg not found: program not found", action: "Configure" },
+        { name: "Keyword enrichment", meta: "not configured", action: "Configure" },
+        { name: "SFTP upload", meta: "0 profile(s)", action: "Configure" },
+        { name: "Jobs", meta: "5 pending · 2 running · 31 done · 2 failed", action: "Show" },
+      ],
+      legacyRows: [
+        { path: "D:\\Photos\\2026-08\\ridge-pine-dawn-0412.jpg", kind: "image", size: "8.4 MB", status: "ingested", ingested: "28/08/2026, 09:14:22", analysisAction: "Re-analyze", analysisView: "Hide", metaAction: "Regenerate" },
+        { path: "D:\\Photos\\2026-08\\harbour-nets-0398.jpg", kind: "image", size: "7.1 MB", status: "ingested", ingested: "28/08/2026, 09:14:22", analysisAction: "Re-analyze", analysisView: "View", metaAction: "Regenerate" },
+        { path: "D:\\Photos\\2026-08\\cliff-path-timelapse.mp4", kind: "video", size: "412.6 MB", status: "ingested", ingested: "28/08/2026, 09:16:03", analysisAction: "Analyze", analysisView: "", metaAction: "Generate" },
+        { path: "D:\\Photos\\2026-08\\glacier-ice-close.jpg", kind: "image", size: "9.8 MB", status: "ingested", ingested: "28/08/2026, 09:16:41", analysisAction: "Analyze", analysisView: "", metaAction: "Generate" },
+      ],
+      legacyChips: HEAT.slice(0, 14).map(([w]) => w),
+
+      dropIncoming: [
+        { name: "ridge-pine-dawn-0417.jpg", meta: "JPEG · 8.9 MB · 6000×4000", note: "ready", dot: "#1a7f37" },
+        { name: "ridge-pine-dawn-0418.jpg", meta: "JPEG · 8.7 MB · 6000×4000", note: "ready", dot: "#1a7f37" },
+        { name: "harbour-nets-0398.jpg", meta: "JPEG · 7.1 MB · 5472×3648", note: "duplicate hash", dot: "#b7791f" },
+        { name: "cliff-path-timelapse.mp4", meta: "MP4 · 412.6 MB · 3840×2160", note: "needs ffmpeg", dot: "#b7791f" },
+        { name: "scan-contact-sheet.tif", meta: "TIFF · 118.0 MB", note: "unsupported", dot: "#b3261e" },
+        { name: "glacier-ice-close.jpg", meta: "JPEG · 9.8 MB · 6000×4000", note: "ready", dot: "#1a7f37" },
+      ],
+      watchFolders: [
+        { path: "D:\\Photos\\2026-08", meta: "watching · 2 new files · scanned 11 s ago", on: "On", dot: "#1a7f37" },
+        { path: "D:\\Photos\\2026-07", meta: "watching · idle · scanned 4 min ago", on: "On", dot: "#1a7f37" },
+        { path: "E:\\Client-work\\ceramics", meta: "paused · 41 files not ingested", on: "Off", dot: "#8b919c" },
+      ],
+      editorKeywords: HEAT.slice(0, 26).map(([word, score], i) => {
+        const [bg, bd] = this.heatColor(score, false);
+        return { word, score, bg, bd, rank: i + 1, grab: i < 8 ? "#2f6fed" : "#c9ced6" };
+      }),
+      editorSites: [
+        { site: "Shutterstock", on: true, bg: "#171a1f", fg: "#fff" },
+        { site: "Adobe Stock", on: false, bg: "#fff", fg: "#5c636e" },
+        { site: "Getty", on: false, bg: "#fff", fg: "#5c636e" },
+        { site: "Alamy", on: false, bg: "#fff", fg: "#5c636e" },
+      ],
+      triageQueue: ASSETS.slice(0, 7).map((a, i) => ({
+        name: a.name, c1: a.c1, c2: a.c2,
+        bd: i === 1 ? "#2f6fed" : "transparent",
+        mark: i === 0 ? "✓" : i === 1 ? "•" : "",
+        markBg: i === 0 ? "#1a7f37" : i === 1 ? "#2f6fed" : "transparent",
+      })),
+      triageChecks: [
+        { label: "Title within all 4 site limits", state: "pass", dot: "#1a7f37" },
+        { label: "34 keywords · above minimum of 7", state: "pass", dot: "#1a7f37" },
+        { label: "3 keywords below demand floor", state: "warn", dot: "#b7791f" },
+        { label: "No trademarked terms detected", state: "pass", dot: "#1a7f37" },
+        { label: "Description reads as commercial-safe", state: "pass", dot: "#1a7f37" },
+      ],
+      jobs: [
+        { asset: "studio-ceramics-114.jpg", step: "Generate metadata", pct: "72%", eta: "~8 s", state: "running", bg: "#2f6fed", chipBg: "rgba(47,111,237,.14)", chipFg: "#2f6fed" },
+        { asset: "cafe-window-light.jpg", step: "Analyze (vision)", pct: "31%", eta: "~22 s", state: "running", bg: "#2f6fed", chipBg: "rgba(47,111,237,.14)", chipFg: "#2f6fed" },
+        { asset: "glacier-ice-close.jpg", step: "Analyze (vision)", pct: "0%", eta: "queued", state: "pending", bg: "#dfe2e7", chipBg: "#f0f2f5", chipFg: "#5c636e" },
+        { asset: "wheat-field-drone-05.jpg", step: "Embed (exiftool)", pct: "0%", eta: "queued", state: "pending", bg: "#dfe2e7", chipBg: "#f0f2f5", chipFg: "#5c636e" },
+        { asset: "cliff-path-timelapse.mp4", step: "Extract keyframes", pct: "0%", eta: "blocked", state: "failed", bg: "#e0b3ae", chipBg: "rgba(179,38,30,.1)", chipFg: "#b3261e" },
+        { asset: "market-spices-b02.jpg", step: "Upload (SFTP)", pct: "0%", eta: "no profile", state: "failed", bg: "#e0b3ae", chipBg: "rgba(179,38,30,.1)", chipFg: "#b3261e" },
+        { asset: "harbour-nets-0398.jpg", step: "Upload (SFTP)", pct: "100%", eta: "4.1 s", state: "done", bg: "#9ecfab", chipBg: "rgba(26,127,55,.13)", chipFg: "#177d34" },
+      ],
+      siteProfiles: [
+        { site: "Shutterstock", limits: "title ≤ 200 · desc ≤ 200 · 7–50 keywords", transport: "SFTP · ftp.shutterstock.com", dot: "#1a7f37", status: "connected", active: true },
+        { site: "Adobe Stock", limits: "title ≤ 70 · desc ≤ 200 · 1–49 keywords", transport: "SFTP · sftp.contributor.adobe.com", dot: "#1a7f37", status: "connected", active: false },
+        { site: "Getty / iStock", limits: "title ≤ 120 · desc ≤ 500 · 5–50 keywords", transport: "CSV manifest export", dot: "#b7791f", status: "no transport", active: false },
+        { site: "Alamy", limits: "title ≤ 150 · desc ≤ 500 · 5–50 keywords", transport: "not configured", dot: "#8b919c", status: "off", active: false },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
