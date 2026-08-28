@@ -1026,7 +1026,8 @@ textarea:focus {
   background: linear-gradient(135deg, #cbd5f5, #f0d9c8);
 }
 
-.asset-thumb img {
+.asset-thumb img,
+.asset-thumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1132,7 +1133,8 @@ textarea:focus {
   overflow: hidden;
 }
 
-.inspector-thumb img {
+.inspector-thumb img,
+.inspector-thumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1248,10 +1250,12 @@ textarea:focus {
   flex: none;
 }
 
-.editor-preview img {
+.editor-preview img,
+.editor-preview video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: #111;
 }
 
 .meta-grid {

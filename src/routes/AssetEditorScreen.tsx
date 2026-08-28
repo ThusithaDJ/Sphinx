@@ -222,6 +222,9 @@ export function AssetEditorScreen() {
         <div className="editor-left">
           <div className="editor-preview">
             {asset.media_type === "image" && <img src={convertFileSrc(asset.path)} alt="" />}
+            {asset.media_type === "video" && (
+              <video src={convertFileSrc(asset.path)} controls preload="metadata" />
+            )}
           </div>
           <div className="meta-grid">
             <div className="meta-row">

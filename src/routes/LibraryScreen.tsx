@@ -196,6 +196,9 @@ export function LibraryScreen() {
                       {asset.media_type === "image" && (
                         <img src={convertFileSrc(asset.path)} alt="" loading="lazy" />
                       )}
+                      {asset.media_type === "video" && (
+                        <video src={`${convertFileSrc(asset.path)}#t=0.1`} muted preload="metadata" />
+                      )}
                       <span className="thumb-badge thumb-badge--kind">{asset.media_type}</span>
                       <span className={`thumb-badge thumb-badge--flag flag-${flag}`}>{flag}</span>
                     </div>
@@ -231,6 +234,9 @@ export function LibraryScreen() {
                   <div className="inspector-thumb">
                     {inspected.media_type === "image" && (
                       <img src={convertFileSrc(inspected.path)} alt="" />
+                    )}
+                    {inspected.media_type === "video" && (
+                      <video src={convertFileSrc(inspected.path)} controls preload="metadata" />
                     )}
                   </div>
                   <div className="inspector-header-meta">
