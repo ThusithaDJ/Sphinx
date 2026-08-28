@@ -439,6 +439,21 @@ fn generate_metadata(
     metadata_response(record)
 }
 
+/// Persist a user-edited title/description/keyword set as the asset's latest
+/// metadata, so a later `embed_asset_metadata` picks up the edit rather than
+/// the last AI-generated draft. Used by the asset editor's "Save & embed".
+#[tauri::command]
+fn set_metadata(
+    state: tauri::State<AppState>,
+    asset_id: i64,
+    metadata: GeneratedMetadata,
+) -> Result<MetadataResponse, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let record = db::insert_metadata(&conn, asset_id, &metadata).map_err(|e| e.to_string())?;
+    db::set_asset_status(&conn, asset_id, "metadata_generated").map_err(|e| e.to_string())?;
+    metadata_response(record)
+}
+
 // --- metadata embedding (SPHIN-4) --------------------------------------------
 
 #[tauri::command]
@@ -1091,6 +1106,7 @@ pub fn run() {
             set_limiter_profile,
             get_metadata,
             generate_metadata,
+            set_metadata,
             get_embed_config,
             set_embed_config,
             check_exiftool,

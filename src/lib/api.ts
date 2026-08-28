@@ -256,6 +256,14 @@ export function generateMetadata(
   return invoke("generate_metadata", { projectId, assetId });
 }
 
+/** Persist a user-edited title/description/keyword set for an asset. */
+export function setMetadata(
+  assetId: number,
+  metadata: GeneratedMetadata
+): Promise<MetadataResponse> {
+  return invoke("set_metadata", { assetId, metadata });
+}
+
 // --- SPHIN-4: metadata embedding (IPTC/XMP via exiftool) + CSV export -------
 
 export interface EmbedConfig {
