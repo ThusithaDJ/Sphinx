@@ -179,6 +179,18 @@ fn set_analysis_config(
     db::set_analysis_config(&conn, project_id, &config).map_err(|e| e.to_string())
 }
 
+/// Every vision-provider config a project has saved, keyed by provider name
+/// ("openai", "gemini", "anthropic") -- lets the UI offer switching providers
+/// without losing previously-entered keys/models for the others.
+#[tauri::command]
+fn get_analysis_configs(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<std::collections::HashMap<String, AnalysisConfig>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_analysis_configs(&conn, project_id).map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Serialize)]
 struct AnalysisResponse {
     record_id: i64,
@@ -1066,6 +1078,7 @@ pub fn run() {
             create_project,
             get_analysis_config,
             set_analysis_config,
+            get_analysis_configs,
             get_analysis,
             analyze_asset,
             get_video_config,

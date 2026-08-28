@@ -37,6 +37,7 @@ import {
   generateMetadata,
   getAnalysis,
   getAnalysisConfig,
+  getAnalysisConfigs,
   getEmbedConfig,
   getKeywordConfig,
   getLimiterProfile,
@@ -111,6 +112,17 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+function statusClass(status: string): string {
+  const lower = status.toLowerCase();
+  if (lower.includes("failed") || lower.startsWith("could not") || lower.includes("could not")) {
+    return "status--error";
+  }
+  if (/…$/.test(status)) {
+    return "status--busy";
+  }
+  return "status--ok";
+}
+
 function extensionOf(path: string): string {
   const dot = path.lastIndexOf(".");
   return dot === -1 ? "" : path.slice(dot + 1).toLowerCase();
@@ -128,11 +140,18 @@ export default function App() {
 
   // --- SPHIN-2 analysis state ---
   const [config, setConfig] = useState<AnalysisConfig>(DEFAULT_ANALYSIS_CONFIG);
+  // The config actually persisted as active in the DB -- what Analyze really
+  // uses. Kept separate from `config` (the live form) so switching the
+  // provider dropdown or editing fields can't make the UI claim a provider is
+  // ready before Save has actually made it so.
+  const [activeConfig, setActiveConfig] = useState<AnalysisConfig | null>(null);
+  const [savedConfigs, setSavedConfigs] = useState<Record<string, AnalysisConfig>>({});
   const [configReady, setConfigReady] = useState(false);
   const [configDirty, setConfigDirty] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [analyses, setAnalyses] = useState<Record<number, AnalysisResult>>({});
   const [analyzing, setAnalyzing] = useState<Record<number, boolean>>({});
+  const [analyzeErrors, setAnalyzeErrors] = useState<Record<number, string>>({});
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
   // --- SPHIN-3 metadata generation state ---
@@ -216,9 +235,13 @@ export default function App() {
   }, [assets]);
 
   useEffect(() => {
-    getAnalysisConfig(PROJECT_ID)
-      .then((saved) => {
-        if (saved) setConfig({ ...DEFAULT_ANALYSIS_CONFIG, ...saved });
+    Promise.all([getAnalysisConfig(PROJECT_ID), getAnalysisConfigs(PROJECT_ID)])
+      .then(([saved, allSaved]) => {
+        if (saved) {
+          setConfig({ ...DEFAULT_ANALYSIS_CONFIG, ...saved });
+          setActiveConfig(saved);
+        }
+        setSavedConfigs(allSaved);
         setConfigReady(true);
         if (!saved) setShowConfig(true);
       })
@@ -446,17 +469,28 @@ export default function App() {
     setConfigDirty(true);
   }
 
+  function handleProviderChange(provider: ProviderKind) {
+    const saved = savedConfigs[provider];
+    setConfig(saved ? { ...DEFAULT_ANALYSIS_CONFIG, ...saved } : { ...DEFAULT_ANALYSIS_CONFIG, provider });
+    // Even when a saved config is loaded verbatim, the DB's "active" provider
+    // hasn't changed yet -- Save still needs a click to make this the one
+    // Analyze actually uses.
+    setConfigDirty(true);
+  }
+
   async function handleSaveConfig() {
     try {
       await setAnalysisConfig(PROJECT_ID, config);
       setConfigDirty(false);
+      setActiveConfig(config);
+      setSavedConfigs((prev) => ({ ...prev, [config.provider]: config }));
       setStatus(`Saved ${PROVIDER_LABELS[config.provider]} configuration.`);
     } catch (err) {
       setStatus(`Could not save configuration: ${String(err)}`);
     }
   }
 
-  const hasKey = config.api_key.trim().length > 0;
+  const hasKey = Boolean(activeConfig && activeConfig.api_key.trim().length > 0);
 
   function patchProfile(patch: Partial<LimiterProfile>) {
     setProfile((prev) => ({ ...prev, ...patch }));
@@ -731,6 +765,10 @@ export default function App() {
 
   async function handleAnalyze(asset: Asset) {
     setAnalyzing((prev) => ({ ...prev, [asset.id]: true }));
+    setAnalyzeErrors((prev) => {
+      const { [asset.id]: _drop, ...rest } = prev;
+      return rest;
+    });
     setStatus(`Analyzing ${asset.path.split(/[\\/]/).pop()}…`);
     try {
       const { result } = await analyzeAsset(PROJECT_ID, asset.id);
@@ -739,7 +777,9 @@ export default function App() {
       setStatus(`Analyzed with ${result.provider}/${result.model}.`);
       await refresh();
     } catch (err) {
-      setStatus(`Analysis failed: ${String(err)}`);
+      const message = String(err);
+      setAnalyzeErrors((prev) => ({ ...prev, [asset.id]: message }));
+      setStatus(`Analysis failed: ${message}`);
     } finally {
       setAnalyzing((prev) => ({ ...prev, [asset.id]: false }));
     }
@@ -775,7 +815,7 @@ export default function App() {
         </div>
       </div>
 
-      <p className="status">{status}</p>
+      <p className={`status ${statusClass(status)}`}>{status}</p>
 
       <section className="analysis-config">
         <div className="analysis-config-head">
@@ -783,8 +823,8 @@ export default function App() {
             AI vision{" "}
             <span className="count">
               {configReady
-                ? hasKey
-                  ? `· ${PROVIDER_LABELS[config.provider]}`
+                ? hasKey && activeConfig
+                  ? `· ${PROVIDER_LABELS[activeConfig.provider]} active`
                   : "· not configured"
                 : "· loading…"}
             </span>
@@ -800,11 +840,12 @@ export default function App() {
               Provider
               <select
                 value={config.provider}
-                onChange={(e) => patchConfig({ provider: e.target.value as ProviderKind })}
+                onChange={(e) => handleProviderChange(e.target.value as ProviderKind)}
               >
                 {(Object.keys(PROVIDER_LABELS) as ProviderKind[]).map((p) => (
                   <option key={p} value={p}>
                     {PROVIDER_LABELS[p]}
+                    {savedConfigs[p] ? " (configured)" : ""}
                   </option>
                 ))}
               </select>
@@ -850,6 +891,11 @@ export default function App() {
               <button onClick={handleSaveConfig} disabled={!configDirty} className="btn-active">
                 Save
               </button>
+              {configDirty && (
+                <span className="hint">
+                  Save to make {PROVIDER_LABELS[config.provider]} the active provider for Analyze.
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -1365,6 +1411,11 @@ export default function App() {
                             >
                               {expanded[asset.id] ? "Hide" : "View"}
                             </button>
+                          )}
+                          {analyzeErrors[asset.id] && (
+                            <div className="row-error" title={analyzeErrors[asset.id]}>
+                              {analyzeErrors[asset.id]}
+                            </div>
                           )}
                         </>
                       )}

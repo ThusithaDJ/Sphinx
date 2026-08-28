@@ -131,6 +131,13 @@ export function setAnalysisConfig(
   return invoke("set_analysis_config", { projectId, config });
 }
 
+/** Every provider config this project has saved, keyed by provider name. */
+export function getAnalysisConfigs(
+  projectId: number
+): Promise<Record<string, AnalysisConfig>> {
+  return invoke("get_analysis_configs", { projectId });
+}
+
 export function getAnalysis(assetId: number): Promise<AnalysisResponse | null> {
   return invoke("get_analysis", { assetId });
 }

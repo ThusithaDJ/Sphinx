@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::Utc;
@@ -15,8 +16,15 @@ use crate::video::VideoConfig;
 pub const SCHEMA_VERSION: i32 = 6;
 
 /// Key under which the per-project analysis config JSON is stored in
-/// `project_settings`.
+/// `project_settings`. This holds the currently *active* provider's config
+/// (the one [`analyze_file`](crate::analysis::analyze_file) actually uses).
 const ANALYSIS_CONFIG_KEY: &str = "analysis_config";
+
+/// Key under which a project's per-provider analysis configs are stored, as a
+/// JSON map of provider name -> [`AnalysisConfig`]. Lets a project keep, say,
+/// both an OpenAI and a Gemini config on hand and switch the active one
+/// without re-entering the other's API key/model/etc.
+const ANALYSIS_CONFIGS_KEY: &str = "analysis_configs";
 
 /// Key under which the per-project limiter profile JSON is stored in
 /// `project_settings` (SPHIN-19).
@@ -742,7 +750,33 @@ pub fn set_analysis_config(
     config: &AnalysisConfig,
 ) -> Result<()> {
     let json = serde_json::to_string(config)?;
-    set_project_setting(conn, project_id, ANALYSIS_CONFIG_KEY, &json)
+    set_project_setting(conn, project_id, ANALYSIS_CONFIG_KEY, &json)?;
+
+    let mut configs = get_analysis_configs(conn, project_id)?;
+    configs.insert(config.provider.as_str().to_string(), config.clone());
+    let configs_json = serde_json::to_string(&configs)?;
+    set_project_setting(conn, project_id, ANALYSIS_CONFIGS_KEY, &configs_json)
+}
+
+/// Every provider config a project has ever saved, keyed by provider name
+/// (SPHIN-17 follow-up). The currently-active config is always included even
+/// if it predates this map (e.g. data saved before this feature existed),
+/// so callers never lose track of what's actually in use.
+pub fn get_analysis_configs(
+    conn: &Connection,
+    project_id: i64,
+) -> Result<HashMap<String, AnalysisConfig>> {
+    let mut configs: HashMap<String, AnalysisConfig> =
+        match get_project_setting(conn, project_id, ANALYSIS_CONFIGS_KEY)? {
+            Some(json) => serde_json::from_str(&json)?,
+            None => HashMap::new(),
+        };
+    if let Some(active) = get_analysis_config(conn, project_id)? {
+        configs
+            .entry(active.provider.as_str().to_string())
+            .or_insert(active);
+    }
+    Ok(configs)
 }
 
 // --- analyses (SPHIN-2) --------------------------------------------------------
@@ -1169,6 +1203,36 @@ mod tests {
         // A second project keeps its own config.
         let p2 = create_project(&conn, "Nature").unwrap();
         assert!(get_analysis_config(&conn, p2.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn saving_one_provider_does_not_clobber_another() {
+        let conn = open_in_memory().unwrap();
+
+        let mut openai = AnalysisConfig::new(ProviderKind::OpenAi);
+        openai.api_key = "openai-key".into();
+        set_analysis_config(&conn, 1, &openai).unwrap();
+
+        let mut gemini = AnalysisConfig::new(ProviderKind::Gemini);
+        gemini.api_key = "gemini-key".into();
+        set_analysis_config(&conn, 1, &gemini).unwrap();
+
+        // The most recently saved config is the active one...
+        let active = get_analysis_config(&conn, 1).unwrap().unwrap();
+        assert_eq!(active.provider, ProviderKind::Gemini);
+        assert_eq!(active.api_key, "gemini-key");
+
+        // ...but the OpenAI config saved earlier is still there.
+        let all = get_analysis_configs(&conn, 1).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all["openai"].api_key, "openai-key");
+        assert_eq!(all["gemini"].api_key, "gemini-key");
+
+        // Switching back to OpenAI as active doesn't lose Gemini either.
+        set_analysis_config(&conn, 1, &openai).unwrap();
+        let all = get_analysis_configs(&conn, 1).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all["gemini"].api_key, "gemini-key");
     }
 
     #[test]
