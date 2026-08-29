@@ -10,6 +10,7 @@ import {
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
+import { type ToastItem, type ToastKind } from "../components/Toast";
 import {
   type AnalysisConfig,
   type AnalysisResult,
@@ -33,12 +34,14 @@ import {
   DEFAULT_KEYWORD_CONFIG,
   DEFAULT_TRANSCRIPTION_CONFIG,
   DEFAULT_VIDEO_CONFIG,
+  addSiteProfile,
   analyzeAsset,
   assetCount,
   checkExiftool,
   checkFfmpeg,
   checkOllama,
   createSftpProfile,
+  deleteAsset,
   deleteSftpProfile,
   detectGpu,
   embedAssetMetadata,
@@ -61,9 +64,11 @@ import {
   listLimiterProfiles,
   listQueueJobs,
   listSftpProfiles,
+  listSiteProfiles,
   onAssetsIngested,
   onJobUpdated,
   queueJobCounts,
+  removeSiteProfile,
   retryJob,
   setAnalysisConfig,
   setEmbedConfig,
@@ -120,6 +125,13 @@ function summaryLine(summary: IngestSummary): string {
   if (summary.skipped) parts.push(`${summary.skipped} skipped`);
   if (summary.errors) parts.push(`${summary.errors} error${summary.errors === 1 ? "" : "s"}`);
   return parts.join(" · ");
+}
+
+/** Best-effort color for a status message that didn't specify one explicitly. */
+function classifyStatus(message: string): ToastKind {
+  if (/fail|could not|error/i.test(message)) return "error";
+  if (/select .* first|no eligible|no assets are eligible|not configured/i.test(message)) return "info";
+  return "success";
 }
 
 export interface ToolStatus {
@@ -194,8 +206,38 @@ function useSphinxApp() {
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetTotal, setAssetTotal] = useState(0);
-  const [status, setStatus] = useState("Drop images or video to get started.");
+  const [status, setStatusRaw] = useState("Drop images or video to get started.");
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+
+  // --- toast notifications ---
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const nextToastId = useRef(0);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const pushToast = useCallback(
+    (message: string, kind: ToastKind) => {
+      const id = ++nextToastId.current;
+      setToasts((prev) => [...prev, { id, message, kind }]);
+      setTimeout(() => dismissToast(id), 4200);
+    },
+    [dismissToast]
+  );
+
+  // Every action already reports through setStatus, so wiring the toast push
+  // in here gives every action a colored notification for free instead of
+  // touching every call site. Kind is inferred from the message unless the
+  // caller is explicit -- see classifyStatus below.
+  const setStatus = useCallback(
+    (message: string, kind?: ToastKind) => {
+      setStatusRaw(message);
+      pushToast(message, kind ?? classifyStatus(message));
+    },
+    [pushToast]
+  );
 
   // --- import (2a) ---
   const [isDragging, setIsDragging] = useState(false);
@@ -219,6 +261,7 @@ function useSphinxApp() {
 
   // --- metadata generation & limiter profiles (SPHIN-3 / SPHIN-19) ---
   const [limiterPresets, setLimiterPresets] = useState<LimiterProfile[]>([]);
+  const [builtInProfiles, setBuiltInProfiles] = useState<LimiterProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<LimiterProfile | null>(null);
   const [profileReady, setProfileReady] = useState(false);
   const [enabledProfileNames, setEnabledProfileNames] = useState<Set<string>>(new Set());
@@ -259,6 +302,18 @@ function useSphinxApp() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /** Remove an asset from the library (catalog only -- never touches the file on disk). */
+  async function removeAsset(asset: Asset) {
+    try {
+      await deleteAsset(asset.id);
+      setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+      setAssetTotal((prev) => Math.max(0, prev - 1));
+      setStatus(`Removed ${fileName(asset.path)} from the library.`, "warning");
+    } catch (err) {
+      setStatus(`Could not remove ${fileName(asset.path)}: ${String(err)}`, "error");
+    }
+  }
 
   // Backfill analyses/metadata for assets we haven't loaded yet.
   const loadedAnalysisIds = useRef<Set<number>>(new Set());
@@ -308,6 +363,9 @@ function useSphinxApp() {
 
   useEffect(() => {
     listLimiterProfiles()
+      .then((builtins) => setBuiltInProfiles(builtins))
+      .catch(() => {});
+    listSiteProfiles(PROJECT_ID)
       .then((list) => {
         setLimiterPresets(list);
         setEnabledProfileNames(new Set(list.map((p) => p.name)));
@@ -475,9 +533,10 @@ function useSphinxApp() {
       return;
     }
     setBusy(true);
+    setBusyLabel(`Ingesting ${ready.length} file${ready.length === 1 ? "" : "s"}…`);
     try {
       const summary = await ingestFiles(ready.map((f) => f.path));
-      setStatus(summaryLine(summary));
+      setStatus(summaryLine(summary), "success");
       setIncoming([]);
       await refresh();
       if (queueAfterIngest) {
@@ -487,9 +546,10 @@ function useSphinxApp() {
         if (ids.length) await handleEnqueueBatch("analyze", "Analyze", ids);
       }
     } catch (err) {
-      setStatus(`Ingestion failed: ${String(err)}`);
+      setStatus(`Ingestion failed: ${String(err)}`, "error");
     } finally {
       setBusy(false);
+      setBusyLabel(null);
     }
   }
 
@@ -513,14 +573,16 @@ function useSphinxApp() {
     const selection = await open({ directory: true });
     if (!selection || Array.isArray(selection)) return;
     setBusy(true);
+    setBusyLabel(`Importing ${selection}…`);
     try {
       const summary = await ingestFolder(selection);
-      setStatus(`Folder import: ${summaryLine(summary)}`);
+      setStatus(`Folder import: ${summaryLine(summary)}`, "success");
       await refresh();
     } catch (err) {
-      setStatus(`Folder import failed: ${String(err)}`);
+      setStatus(`Folder import failed: ${String(err)}`, "error");
     } finally {
       setBusy(false);
+      setBusyLabel(null);
     }
   }
 
@@ -619,6 +681,43 @@ function useSphinxApp() {
       setStatus(`"${profile.name}" is now the active target profile.`);
     } catch (err) {
       setStatus(`Could not save limiter profile: ${String(err)}`);
+    }
+  }
+
+  /** Add a new custom stock-site profile with permissive starting limits (the
+   * user tunes them afterwards from the existing per-profile detail form). */
+  async function createSiteProfile(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      const custom = await addSiteProfile(PROJECT_ID, {
+        name: trimmed,
+        max_title_chars: 200,
+        max_description_chars: 200,
+        min_keywords: 0,
+        max_keywords: 50,
+        max_keyword_chars: 50,
+      });
+      setLimiterPresets([...builtInProfiles, ...custom]);
+      setEnabledProfileNames((prev) => new Set(prev).add(trimmed));
+      setStatus(`Added site profile "${trimmed}".`, "success");
+    } catch (err) {
+      setStatus(`Could not add site profile: ${String(err)}`, "error");
+    }
+  }
+
+  async function deleteSiteProfile(name: string) {
+    try {
+      const custom = await removeSiteProfile(PROJECT_ID, name);
+      setLimiterPresets([...builtInProfiles, ...custom]);
+      setEnabledProfileNames((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+      setStatus(`Removed site profile "${name}".`, "warning");
+    } catch (err) {
+      setStatus(`Could not remove site profile: ${String(err)}`, "error");
     }
   }
 
@@ -846,8 +945,12 @@ function useSphinxApp() {
     status,
     setStatus,
     busy,
+    busyLabel,
     refresh,
+    removeAsset,
     needsReviewIds,
+    toasts,
+    dismissToast,
 
     isDragging,
     watch,
@@ -881,12 +984,15 @@ function useSphinxApp() {
     gpu,
 
     limiterPresets,
+    builtInProfiles,
     activeProfile,
     profileReady,
     enabledProfileNames,
     enabledSites,
     toggleProfileEnabled,
     saveActiveProfile,
+    createSiteProfile,
+    deleteSiteProfile,
 
     metadata,
     generating,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { NavBar } from "../components/NavBar";
 import { StatusStrip } from "../components/StatusStrip";
 import { Toggle, SectionLabel } from "../components/Toggle";
@@ -19,6 +19,28 @@ export function SitesScreen() {
   const [draftProfile, setDraftProfile] = useState<LimiterProfile | null>(null);
   const [sftpDraft, setSftpDraft] = useState<SftpDraft>(BLANK_SFTP_DRAFT);
   const [saving, setSaving] = useState(false);
+  const [addingSite, setAddingSite] = useState(false);
+  const [newSiteName, setNewSiteName] = useState("");
+
+  function isCustomProfile(name: string) {
+    return !app.builtInProfiles.some((b) => b.name === name);
+  }
+
+  async function handleAddSite() {
+    const name = newSiteName.trim();
+    if (!name) return;
+    await app.createSiteProfile(name);
+    setNewSiteName("");
+    setAddingSite(false);
+    setSelectedName(name);
+  }
+
+  async function handleRemoveSite(e: MouseEvent, name: string) {
+    e.stopPropagation();
+    if (!window.confirm(`Remove the "${name}" site profile? This does not affect assets already targeting it.`)) return;
+    await app.deleteSiteProfile(name);
+    if (selectedName === name) setSelectedName("");
+  }
 
   const selected = app.limiterPresets.find((p) => p.name === selectedName) ?? app.limiterPresets[0] ?? null;
 
@@ -108,7 +130,13 @@ export function SitesScreen() {
 
   return (
     <div className="app-shell">
-      <NavBar right={<button className="btn-primary" disabled title="Custom site profiles aren't supported yet">Add site profile</button>} />
+      <NavBar
+        right={
+          <button className="btn-primary" onClick={() => setAddingSite((v) => !v)}>
+            Add site profile
+          </button>
+        }
+      />
       <div className="sites-screen">
         <div className="sites-list">
           {app.limiterPresets.map((p) => {
@@ -132,10 +160,42 @@ export function SitesScreen() {
                   </span>
                   <span className="site-row-transport">{sftp ? `SFTP · ${sftp.host}` : "not configured"}</span>
                 </div>
+                {isCustomProfile(p.name) && (
+                  <button
+                    className="site-row-remove"
+                    title={`Remove "${p.name}"`}
+                    onClick={(e) => void handleRemoveSite(e, p.name)}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             );
           })}
           <p className="sites-list-note">Metadata is validated against every enabled profile before a file can be approved.</p>
+          {addingSite && (
+            <div className="add-site-form">
+              <input
+                autoFocus
+                placeholder="Site name, e.g. Getty Images"
+                value={newSiteName}
+                onChange={(e) => setNewSiteName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void handleAddSite()}
+              />
+              <button className="btn-primary" onClick={() => void handleAddSite()} disabled={!newSiteName.trim()}>
+                Add
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setAddingSite(false);
+                  setNewSiteName("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="sites-detail">

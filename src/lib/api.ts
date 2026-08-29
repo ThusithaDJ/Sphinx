@@ -54,6 +54,11 @@ export function assetCount(): Promise<number> {
   return invoke("asset_count");
 }
 
+/** Remove an asset from the library. The original file on disk is untouched. */
+export function deleteAsset(assetId: number): Promise<void> {
+  return invoke("delete_asset", { assetId });
+}
+
 /** Fires whenever folder-watch mode ingests one or more new files. */
 export function onAssetsIngested(
   handler: (summary: IngestSummary) => void
@@ -259,6 +264,24 @@ export function setLimiterProfile(
   profile: LimiterProfile
 ): Promise<void> {
   return invoke("set_limiter_profile", { projectId, profile });
+}
+
+/** Built-in presets plus any custom site profiles the project has added. */
+export function listSiteProfiles(projectId: number): Promise<LimiterProfile[]> {
+  return invoke("list_site_profiles", { projectId });
+}
+
+/** Add (or edit, by re-adding with the same name) a custom site profile. */
+export function addSiteProfile(
+  projectId: number,
+  profile: LimiterProfile
+): Promise<LimiterProfile[]> {
+  return invoke("add_site_profile", { projectId, profile });
+}
+
+/** Remove a custom site profile by name. */
+export function removeSiteProfile(projectId: number, name: string): Promise<LimiterProfile[]> {
+  return invoke("remove_site_profile", { projectId, name });
 }
 
 export function getMetadata(assetId: number): Promise<MetadataResponse | null> {

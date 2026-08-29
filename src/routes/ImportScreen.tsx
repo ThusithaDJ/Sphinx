@@ -68,6 +68,12 @@ export function ImportScreen() {
                 Import folder…
               </button>
             </div>
+            {app.busy && (
+              <div className="import-progress">
+                <span className="import-progress-spinner" />
+                <span className="import-progress-label">{app.busyLabel ?? "Working…"}</span>
+              </div>
+            )}
           </div>
 
           <div className="panel watch-panel">

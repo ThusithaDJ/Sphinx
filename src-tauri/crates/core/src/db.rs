@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::analysis::AnalysisConfig;
 use crate::embed::EmbedConfig;
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 use crate::keywords::KeywordConfig;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
 use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project, SftpProfileRecord};
@@ -29,6 +29,11 @@ const ANALYSIS_CONFIGS_KEY: &str = "analysis_configs";
 /// Key under which the per-project limiter profile JSON is stored in
 /// `project_settings` (SPHIN-19).
 const LIMITER_PROFILE_KEY: &str = "limiter_profile";
+
+/// Key under which a project's user-added custom site profiles are stored,
+/// as a JSON array of [`LimiterProfile`] (on top of the fixed built-in
+/// presets, which aren't stored -- see [`get_custom_site_profiles`]).
+const CUSTOM_SITE_PROFILES_KEY: &str = "custom_site_profiles";
 
 /// Key under which the per-project embed config JSON is stored in
 /// `project_settings` (SPHIN-20).
@@ -364,6 +369,15 @@ pub fn set_asset_status(conn: &Connection, asset_id: i64, status: &str) -> Resul
         "UPDATE assets SET status = ?2, updated_at = ?3 WHERE id = ?1",
         params![asset_id, status, Utc::now().to_rfc3339()],
     )?;
+    Ok(())
+}
+
+/// Remove an asset from the library. Only drops the catalog row (and, via
+/// `ON DELETE CASCADE`, its jobs/analyses/metadata) -- the original file on
+/// disk is never touched, since assets are referenced in place rather than
+/// owned/copied by Sphinx.
+pub fn delete_asset(conn: &Connection, asset_id: i64) -> Result<()> {
+    conn.execute("DELETE FROM assets WHERE id = ?1", params![asset_id])?;
     Ok(())
 }
 
@@ -840,6 +854,62 @@ pub fn set_limiter_profile(
     set_project_setting(conn, project_id, LIMITER_PROFILE_KEY, &json)
 }
 
+/// A project's user-added custom site profiles (on top of
+/// [`LimiterProfile::built_ins`]), letting a project target sites beyond the
+/// fixed preset list.
+pub fn get_custom_site_profiles(conn: &Connection, project_id: i64) -> Result<Vec<LimiterProfile>> {
+    match get_project_setting(conn, project_id, CUSTOM_SITE_PROFILES_KEY)? {
+        Some(json) => Ok(serde_json::from_str(&json)?),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn set_custom_site_profiles(conn: &Connection, project_id: i64, profiles: &[LimiterProfile]) -> Result<()> {
+    let json = serde_json::to_string(profiles)?;
+    set_project_setting(conn, project_id, CUSTOM_SITE_PROFILES_KEY, &json)
+}
+
+/// Add a custom site profile, replacing any existing custom profile with the
+/// same name (so re-saving an edit doesn't create a duplicate). Returns the
+/// full updated list.
+pub fn add_custom_site_profile(
+    conn: &Connection,
+    project_id: i64,
+    profile: LimiterProfile,
+) -> Result<Vec<LimiterProfile>> {
+    let name = profile.name.trim().to_string();
+    if name.is_empty() {
+        return Err(CoreError::Validation("site profile name cannot be blank".to_string()));
+    }
+    if LimiterProfile::built_ins()
+        .iter()
+        .any(|b| b.name.eq_ignore_ascii_case(&name))
+    {
+        return Err(CoreError::Validation(format!(
+            "\"{name}\" is already a built-in site profile"
+        )));
+    }
+    let mut profiles = get_custom_site_profiles(conn, project_id)?;
+    profiles.retain(|p| !p.name.eq_ignore_ascii_case(&name));
+    let mut profile = profile;
+    profile.name = name;
+    profiles.push(profile);
+    set_custom_site_profiles(conn, project_id, &profiles)?;
+    Ok(profiles)
+}
+
+/// Remove a custom site profile by name. Returns the full updated list.
+pub fn remove_custom_site_profile(
+    conn: &Connection,
+    project_id: i64,
+    name: &str,
+) -> Result<Vec<LimiterProfile>> {
+    let mut profiles = get_custom_site_profiles(conn, project_id)?;
+    profiles.retain(|p| p.name != name);
+    set_custom_site_profiles(conn, project_id, &profiles)?;
+    Ok(profiles)
+}
+
 /// The per-project embed (exiftool) configuration (SPHIN-20), or `None` if
 /// the project has never had one saved (callers should fall back to
 /// [`EmbedConfig::default`]).
@@ -1178,6 +1248,28 @@ mod tests {
     }
 
     #[test]
+    fn delete_asset_removes_it_and_cascades_related_rows() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "hash123", 42, "image").unwrap();
+        insert_job(&conn, a.id, "analysis").unwrap();
+
+        delete_asset(&conn, a.id).unwrap();
+
+        assert!(get_asset(&conn, a.id).unwrap().is_none());
+        assert_eq!(count_assets(&conn).unwrap(), 0);
+        let job_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jobs WHERE asset_id = ?1", [a.id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(job_count, 0, "deleting an asset should cascade-delete its jobs");
+    }
+
+    #[test]
+    fn deleting_an_unknown_asset_is_not_an_error() {
+        let conn = open_in_memory().unwrap();
+        assert!(delete_asset(&conn, 999).is_ok());
+    }
+
+    #[test]
     fn default_project_exists() {
         let conn = open_in_memory().unwrap();
         let projects = list_projects(&conn).unwrap();
@@ -1259,6 +1351,35 @@ mod tests {
 
         let p2 = create_project(&conn, "Nature").unwrap();
         assert!(get_limiter_profile(&conn, p2.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn custom_site_profiles_can_be_added_and_removed() {
+        let conn = open_in_memory().unwrap();
+        assert!(get_custom_site_profiles(&conn, 1).unwrap().is_empty());
+
+        let profiles = add_custom_site_profile(&conn, 1, LimiterProfile::custom("My Site")).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].name, "My Site");
+
+        // Re-adding the same name replaces rather than duplicates.
+        let mut edited = LimiterProfile::custom("My Site");
+        edited.max_keywords = 10;
+        let profiles = add_custom_site_profile(&conn, 1, edited).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].max_keywords, 10);
+
+        let profiles = remove_custom_site_profile(&conn, 1, "My Site").unwrap();
+        assert!(profiles.is_empty());
+        assert!(get_custom_site_profiles(&conn, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn custom_site_profile_rejects_blank_or_built_in_names() {
+        let conn = open_in_memory().unwrap();
+        assert!(add_custom_site_profile(&conn, 1, LimiterProfile::custom("  ")).is_err());
+        assert!(add_custom_site_profile(&conn, 1, LimiterProfile::custom("shutterstock")).is_err());
+        assert!(get_custom_site_profiles(&conn, 1).unwrap().is_empty());
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { ReviewScreen } from "./routes/ReviewScreen";
 import { QueueScreen } from "./routes/QueueScreen";
 import { SitesScreen } from "./routes/SitesScreen";
 import { SettingsScreen } from "./routes/SettingsScreen";
+import { ToastStack } from "./components/Toast";
 
 function Router() {
   const app = useApp();
@@ -28,10 +29,16 @@ function Router() {
   }
 }
 
+function ToastHost() {
+  const app = useApp();
+  return <ToastStack toasts={app.toasts} onDismiss={app.dismissToast} />;
+}
+
 export default function App() {
   return (
     <AppProvider>
       <Router />
+      <ToastHost />
     </AppProvider>
   );
 }

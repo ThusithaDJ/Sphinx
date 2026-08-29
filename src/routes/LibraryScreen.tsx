@@ -201,6 +201,26 @@ export function LibraryScreen() {
                       )}
                       <span className="thumb-badge thumb-badge--kind">{asset.media_type}</span>
                       <span className={`thumb-badge thumb-badge--flag flag-${flag}`}>{flag}</span>
+                      <span
+                        className="asset-delete-btn"
+                        role="button"
+                        aria-label="Remove from library"
+                        title="Remove from library"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Remove "${asset.path.split(/[\\/]/).pop()}" from the library? The file on disk is not deleted.`)) {
+                            void app.removeAsset(asset);
+                          }
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          <path d="M10 11v6" />
+                          <path d="M14 11v6" />
+                          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                        </svg>
+                      </span>
                     </div>
                     <div className="asset-body">
                       <div className="asset-filename" title={asset.path}>
@@ -230,15 +250,15 @@ export function LibraryScreen() {
               <div className="empty-state">Select an asset to inspect it here.</div>
             ) : (
               <>
+                <div className="inspector-preview">
+                  {inspected.media_type === "image" && (
+                    <img src={convertFileSrc(inspected.path)} alt="" />
+                  )}
+                  {inspected.media_type === "video" && (
+                    <video src={convertFileSrc(inspected.path)} controls preload="metadata" />
+                  )}
+                </div>
                 <div className="inspector-header">
-                  <div className="inspector-thumb">
-                    {inspected.media_type === "image" && (
-                      <img src={convertFileSrc(inspected.path)} alt="" />
-                    )}
-                    {inspected.media_type === "video" && (
-                      <video src={convertFileSrc(inspected.path)} controls preload="metadata" />
-                    )}
-                  </div>
                   <div className="inspector-header-meta">
                     <div className="inspector-filename" title={inspected.path}>
                       {inspected.path.split(/[\\/]/).pop()}

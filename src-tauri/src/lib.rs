@@ -64,21 +64,39 @@ fn summarize(results: Vec<sphinx_core::Result<IngestOutcome>>) -> IngestSummary 
 
 /// Ingest an explicit list of file paths (from the native file picker or a
 /// drag-and-drop event). SPHIN-11.
+///
+/// Runs on its own short-lived connection (like the folder-watch callback
+/// does) rather than holding `state.db`'s mutex for the whole batch --
+/// hashing a large batch can take a while, and hogging the app's single
+/// shared connection for that long made every other command (queue polling,
+/// simple reads) queue up behind it, which is what made the app feel hung
+/// during a big import.
 #[tauri::command]
-fn ingest_files(state: tauri::State<AppState>, paths: Vec<String>) -> Result<IngestSummary, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let results = ingest::ingest_paths(&conn, paths);
-    Ok(summarize(results))
+async fn ingest_files(app: tauri::AppHandle, paths: Vec<String>) -> Result<IngestSummary, String> {
+    let db_path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("sphinx.db");
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+        let results = ingest::ingest_paths(&conn, paths);
+        Ok::<_, String>(summarize(results))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Recursively ingest every supported file in a folder (used both for a
 /// one-off "import this folder" action and to backfill when watch mode is
-/// first turned on for a folder). SPHIN-11 / SPHIN-12.
+/// first turned on for a folder). SPHIN-11 / SPHIN-12. See [`ingest_files`]
+/// for why this uses its own connection instead of `state.db`.
 #[tauri::command]
-fn ingest_folder(state: tauri::State<AppState>, dir: String) -> Result<IngestSummary, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let results = ingest::ingest_directory(&conn, &dir);
-    Ok(summarize(results))
+async fn ingest_folder(app: tauri::AppHandle, dir: String) -> Result<IngestSummary, String> {
+    let db_path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("sphinx.db");
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+        let results = ingest::ingest_directory(&conn, &dir);
+        Ok::<_, String>(summarize(results))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Start watching a folder for new files, ingesting each one as it appears
@@ -143,6 +161,14 @@ fn list_assets(state: tauri::State<AppState>, limit: i64, offset: i64) -> Result
 fn asset_count(state: tauri::State<AppState>) -> Result<i64, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::count_assets(&conn).map_err(|e| e.to_string())
+}
+
+/// Remove an asset from the library (catalog row + cascaded jobs/analyses/
+/// metadata only -- the original file on disk is untouched).
+#[tauri::command]
+fn delete_asset(state: tauri::State<AppState>, asset_id: i64) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::delete_asset(&conn, asset_id).map_err(|e| e.to_string())
 }
 
 // --- projects & analysis config (SPHIN-2 / SPHIN-17) --------------------------
@@ -412,6 +438,44 @@ fn set_limiter_profile(
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::set_limiter_profile(&conn, project_id, &profile).map_err(|e| e.to_string())
+}
+
+/// Every site profile available to a project: the fixed built-in presets
+/// plus any custom ones the project has added (SPHIN-19 follow-up).
+#[tauri::command]
+fn list_site_profiles(
+    state: tauri::State<AppState>,
+    project_id: i64,
+) -> Result<Vec<LimiterProfile>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let mut profiles = LimiterProfile::built_ins();
+    profiles.extend(db::get_custom_site_profiles(&conn, project_id).map_err(|e| e.to_string())?);
+    Ok(profiles)
+}
+
+/// Add (or edit, by re-adding with the same name) a custom site profile.
+/// Returns the project's full custom-profile list. Errors if `profile.name`
+/// is blank or collides with a built-in preset name.
+#[tauri::command]
+fn add_site_profile(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    profile: LimiterProfile,
+) -> Result<Vec<LimiterProfile>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::add_custom_site_profile(&conn, project_id, profile).map_err(|e| e.to_string())
+}
+
+/// Remove a custom site profile by name. Built-in presets can't be removed
+/// this way (they aren't stored as custom profiles to begin with).
+#[tauri::command]
+fn remove_site_profile(
+    state: tauri::State<AppState>,
+    project_id: i64,
+    name: String,
+) -> Result<Vec<LimiterProfile>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::remove_custom_site_profile(&conn, project_id, &name).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -1125,6 +1189,7 @@ pub fn run() {
             stop_watch,
             list_assets,
             asset_count,
+            delete_asset,
             list_projects,
             create_project,
             get_analysis_config,
@@ -1142,6 +1207,9 @@ pub fn run() {
             list_limiter_profiles,
             get_limiter_profile,
             set_limiter_profile,
+            list_site_profiles,
+            add_site_profile,
+            remove_site_profile,
             get_metadata,
             generate_metadata,
             set_metadata,

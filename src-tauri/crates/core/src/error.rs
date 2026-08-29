@@ -43,6 +43,10 @@ pub enum CoreError {
     /// Connecting, authenticating, or transferring over SFTP failed.
     #[error("SFTP error: {0}")]
     Sftp(String),
+    /// A caller-supplied value failed a validation rule (e.g. a duplicate or
+    /// blank site profile name). Message is user-facing as-is.
+    #[error("{0}")]
+    Validation(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
