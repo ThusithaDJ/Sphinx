@@ -1,11 +1,36 @@
-# Sphinx
+<p align="center">
+  <img src="site/logo.svg" width="88" alt="Sphinx logo" />
+</p>
 
-**AI-assisted metadata for stock photo and video contributors.**
+<h1 align="center">Sphinx</h1>
+
+<p align="center">
+  <b>AI-assisted metadata for stock photo and video contributors.</b><br />
+  Free and open source, for Windows, macOS and Linux.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ThusithaDJ/Sphinx/releases/latest"><img src="https://img.shields.io/github/v/release/ThusithaDJ/Sphinx?label=download&color=2f6bff" alt="Latest release" /></a>
+  <a href="https://github.com/ThusithaDJ/Sphinx/releases"><img src="https://img.shields.io/github/downloads/ThusithaDJ/Sphinx/total?color=d9622b" alt="Total downloads" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555" alt="Platforms: Windows, macOS, Linux" />
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/ThusithaDJ/Sphinx?color=1a7f37" alt="MIT license" /></a>
+</p>
+
+<p align="center">
+  <a href="https://thusithadj.github.io/Sphinx/"><b>Website</b></a> ·
+  <a href="https://github.com/ThusithaDJ/Sphinx/releases/latest"><b>Download</b></a> ·
+  <a href="#quick-start"><b>Quick start</b></a>
+</p>
 
 Sphinx is a free desktop app for Windows, macOS and Linux. Drop in your photos
 and videos, and it writes titles, descriptions and keywords for you, shaped to
 each stock site's rules. It embeds them into your files and uploads them to
 your contributor accounts.
+
+<p align="center">
+  <img src="site/demo.gif" width="900" alt="Demo: selecting an image in the Sphinx library, editing its keywords for Adobe Stock, reviewing in Triage, and checking the job queue in Activity" />
+  <br /><sub>Demo with sample data.</sub>
+</p>
 
 ## Features
 

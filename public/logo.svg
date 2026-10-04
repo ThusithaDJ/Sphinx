@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6bff"/>
+      <stop offset="1" stop-color="#d9622b"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#g)"/>
+  <!-- a price-tag / keyword glyph -->
+  <path d="M18 17h15.5a4 4 0 0 1 2.83 1.17l11.5 11.5a4 4 0 0 1 0 5.66L34.33 47.83a4 4 0 0 1-5.66 0l-11.5-11.5A4 4 0 0 1 16 33.5V19a2 2 0 0 1 2-2z" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="25" cy="26" r="3.5" fill="#fff"/>
+</svg>

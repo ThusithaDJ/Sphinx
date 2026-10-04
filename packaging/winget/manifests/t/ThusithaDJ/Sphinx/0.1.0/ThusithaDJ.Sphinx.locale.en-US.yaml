@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: ThusithaDJ.Sphinx
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Thusitha Jayasundara
+PublisherUrl: https://github.com/ThusithaDJ
+PublisherSupportUrl: https://github.com/ThusithaDJ/Sphinx/issues
+Author: Thusitha Jayasundara
+PackageName: Sphinx
+PackageUrl: https://thusithadj.github.io/Sphinx/
+License: MIT
+LicenseUrl: https://github.com/ThusithaDJ/Sphinx/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Thusitha Jayasundara
+ShortDescription: AI-assisted titles, descriptions and keywords for stock photos and videos.
+Description: |-
+  Sphinx is a desktop app for stock photo and video contributors. It analyzes your media with a
+  vision model (OpenAI, Gemini, Anthropic, or a local Ollama model), writes titles, descriptions
+  and keywords fitted to each stock site's limits (Adobe Stock, Shutterstock, iStock, Dreamstime,
+  123RF, Pond5 and custom sites), embeds IPTC/XMP metadata with ExifTool, exports site CSVs and
+  uploads over SFTP/FTPS. Requires ExifTool, plus FFmpeg for video.
+Moniker: sphinx-stock
+Tags:
+  - stock-photography
+  - microstock
+  - metadata
+  - keywords
+  - iptc
+  - xmp
+  - exiftool
+  - ai
+  - photography
+ReleaseNotesUrl: https://github.com/ThusithaDJ/Sphinx/releases/tag/sphinx-v0.1.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

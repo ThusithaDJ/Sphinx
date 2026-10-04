@@ -1,0 +1,35 @@
+{
+    "version": "0.1.2",
+    "description": "AI-assisted titles, descriptions and keywords for stock photos and videos.",
+    "homepage": "https://thusithadj.github.io/Sphinx/",
+    "license": "MIT",
+    "notes": "Sphinx needs ExifTool (scoop install exiftool) and, for video, FFmpeg (scoop install ffmpeg).",
+    "suggest": {
+        "ExifTool": "exiftool",
+        "FFmpeg": "ffmpeg"
+    },
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ThusithaDJ/Sphinx/releases/download/sphinx-v0.1.2/Sphinx_0.1.2_x64_portable.exe#/sphinx.exe",
+            "hash": "REPLACE_WITH_SHA256_OF_PORTABLE_EXE"
+        }
+    },
+    "bin": "sphinx.exe",
+    "shortcuts": [
+        [
+            "sphinx.exe",
+            "Sphinx"
+        ]
+    ],
+    "checkver": {
+        "github": "https://github.com/ThusithaDJ/Sphinx",
+        "regex": "sphinx-v([\\d.]+)"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ThusithaDJ/Sphinx/releases/download/sphinx-v$version/Sphinx_$version_x64_portable.exe#/sphinx.exe"
+            }
+        }
+    }
+}
