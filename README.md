@@ -34,9 +34,16 @@ Download the latest installer from the
 
 | OS | File |
 | --- | --- |
-| Windows 10/11 | `.exe` (setup) or `.msi` |
+| Windows 10/11 | `-setup.exe` or `.msi` installer, or `_portable.exe` to run without installing |
 | macOS (Apple Silicon / Intel) | `.dmg` for your chip (`aarch64` / `x64`) |
 | Linux | `.AppImage`, `.deb` or `.rpm` |
+
+**No-install options:** the Windows `_portable.exe` and the Linux `.AppImage`
+are single files you can run directly. On Linux, run `chmod +x` on the
+AppImage first. The portable exe needs Microsoft's WebView2 runtime, which
+Windows 11 already includes; on older Windows 10, use the installer, which
+sets it up. Either way, Sphinx stores its library in the data folder listed
+below, not next to the program.
 
 > **First launch warning:** the installers aren't signed with a publisher
 > certificate yet, so your OS will warn you the first time:

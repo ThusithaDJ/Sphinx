@@ -48,6 +48,7 @@ jobs:
         run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -56,7 +57,25 @@ jobs:
           releaseBody: |
             See the assets below to download this version.
 
-            Sphinx needs `exiftool` on PATH (or configured under Settings) to embed metadata, and `ffmpeg` for video keyframe extraction. Neither is bundled with the installer.
+            **Windows:** use the `-setup.exe` or `.msi` installer, or `_portable.exe` to run without installing (needs the WebView2 runtime, which Windows 11 already includes).
+
+            Sphinx needs `exiftool` on PATH (or configured under Connections → Local tools) to embed metadata, and `ffmpeg` for video keyframe extraction. Neither is bundled.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # The bare app exe embeds the whole frontend, so it runs without the
+      # installer. Uploaded by release id because the draft has no tag yet.
+      - name: upload portable Windows exe
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          NAME="Sphinx_${VERSION}_x64_portable.exe"
+          cp src-tauri/target/release/sphinx.exe "$NAME"
+          gh api --method POST \
+            -H "Content-Type: application/octet-stream" \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ steps.tauri.outputs.releaseId }}/assets?name=${NAME}" \
+            --input "$NAME" > /dev/null
