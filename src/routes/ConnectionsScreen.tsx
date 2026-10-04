@@ -96,7 +96,7 @@ export function ConnectionsScreen() {
 
   return (
     <div className="app-shell">
-      <NavBar right={<span style={{ fontSize: 12, color: "var(--faint)" }}>Saved automatically to sphinx.db</span>} />
+      <NavBar right={<span style={{ fontSize: 12, color: "var(--faint)" }}>Saved automatically · keys in your OS credential store</span>} />
       <div className="settings-screen">
         <div className="settings-sidebar">
           {SIDEBAR_ITEMS.map((item) => (
@@ -213,7 +213,7 @@ export function ConnectionsScreen() {
               </>
             ) : (
               <p className="settings-footer-note">
-                Key is stored locally in sphinx.db and never leaves this machine except to the provider.
+                Key is kept in your OS credential store (not in sphinx.db) and is only ever sent to the provider.
               </p>
             )}
           </div>
