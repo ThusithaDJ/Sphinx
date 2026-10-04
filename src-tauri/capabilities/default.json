@@ -8,8 +8,6 @@
     "core:event:default",
     "opener:default",
     "dialog:default",
-    "fs:default",
-    "fs:allow-read-dir",
-    "fs:allow-read-file"
+    "fs:allow-write-text-file"
   ]
 }

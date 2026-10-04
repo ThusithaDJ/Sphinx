@@ -12,14 +12,19 @@
 //! only thing standing between this and a MITM'd or spoofed server on
 //! every connection after the first.
 
+mod ftps;
 mod sftp;
+
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-pub use sftp::{upload_file, UploadOutcome};
+pub use sftp::UploadOutcome;
+
+use crate::error::Result;
 
 /// Which stock site a profile targets -- purely to tailor error messaging
-/// (SPHIN-27); it has no bearing on the SFTP protocol itself.
+/// (SPHIN-27); it has no bearing on the transport protocol itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SftpSite {
@@ -33,6 +38,44 @@ impl Default for SftpSite {
     }
 }
 
+/// Which wire protocol a profile connects with. Some stock sites (e.g.
+/// Shutterstock) only offer FTPS, not SFTP, so a profile has to pick one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportProtocol {
+    Sftp,
+    Ftps,
+}
+
+impl Default for TransportProtocol {
+    fn default() -> Self {
+        TransportProtocol::Sftp
+    }
+}
+
+/// Upload `local_path`'s contents to `profile`'s remote directory, dispatching
+/// to the SFTP or FTPS transport per [`SftpProfile::protocol`].
+pub fn upload_file(
+    profile: &SftpProfile,
+    password: &str,
+    local_path: &Path,
+    remote_filename: &str,
+) -> Result<UploadOutcome> {
+    match profile.protocol {
+        TransportProtocol::Sftp => sftp::upload_file(profile, password, local_path, remote_filename),
+        TransportProtocol::Ftps => ftps::upload_file(profile, password, local_path, remote_filename),
+    }
+}
+
+/// Connect and authenticate against `profile` without transferring a file,
+/// dispatching to the SFTP or FTPS transport per [`SftpProfile::protocol`].
+pub fn test_connection(profile: &SftpProfile, password: &str) -> Result<UploadOutcome> {
+    match profile.protocol {
+        TransportProtocol::Sftp => sftp::test_connection(profile, password),
+        TransportProtocol::Ftps => ftps::test_connection(profile, password),
+    }
+}
+
 /// A named SFTP connection profile for one stock site. The password lives
 /// in the OS credential store under `credential_key` (see
 /// [`crate::secrets`]), never in this struct once saved.
@@ -42,6 +85,8 @@ pub struct SftpProfile {
     pub name: String,
     #[serde(default)]
     pub site: SftpSite,
+    #[serde(default)]
+    pub protocol: TransportProtocol,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -106,5 +151,19 @@ mod tests {
     #[test]
     fn default_site_is_generic() {
         assert_eq!(SftpSite::default(), SftpSite::Generic);
+    }
+
+    #[test]
+    fn default_protocol_is_sftp() {
+        assert_eq!(TransportProtocol::default(), TransportProtocol::Sftp);
+    }
+
+    #[test]
+    fn protocol_serde_round_trips_snake_case() {
+        assert_eq!(serde_json::to_string(&TransportProtocol::Ftps).unwrap(), "\"ftps\"");
+        assert_eq!(
+            serde_json::from_str::<TransportProtocol>("\"sftp\"").unwrap(),
+            TransportProtocol::Sftp
+        );
     }
 }

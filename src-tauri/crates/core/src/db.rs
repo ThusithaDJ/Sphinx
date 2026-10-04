@@ -9,11 +9,11 @@ use crate::embed::EmbedConfig;
 use crate::error::{CoreError, Result};
 use crate::keywords::KeywordConfig;
 use crate::metadata::{GeneratedMetadata, LimiterProfile};
-use crate::models::{AnalysisRecord, Asset, Job, MetadataRecord, Project, SftpProfileRecord};
+use crate::models::{AnalysisRecord, Asset, Job, JobEvent, MetadataRecord, Project, SftpProfileRecord};
 use crate::transcribe::TranscriptionConfig;
 use crate::video::VideoConfig;
 
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 9;
 
 /// Key under which the per-project analysis config JSON is stored in
 /// `project_settings`. This holds the currently *active* provider's config
@@ -35,6 +35,10 @@ const LIMITER_PROFILE_KEY: &str = "limiter_profile";
 /// presets, which aren't stored -- see [`get_custom_site_profiles`]).
 const CUSTOM_SITE_PROFILES_KEY: &str = "custom_site_profiles";
 
+/// Key under which the names of built-in presets the user deleted from a
+/// project are stored, as a JSON array of strings.
+const HIDDEN_BUILT_IN_SITES_KEY: &str = "hidden_built_in_sites";
+
 /// Key under which the per-project embed config JSON is stored in
 /// `project_settings` (SPHIN-20).
 const EMBED_CONFIG_KEY: &str = "embed_config";
@@ -42,6 +46,11 @@ const EMBED_CONFIG_KEY: &str = "embed_config";
 /// Key under which the per-project keyword-enrichment config JSON is stored
 /// in `project_settings` (SPHIN-5).
 const KEYWORD_CONFIG_KEY: &str = "keyword_config";
+
+/// Key under which user-edited CSV export column layouts (a JSON object keyed
+/// by site name) are stored in `project_settings`. The frontend owns the
+/// shape; the backend just persists it.
+const CSV_LAYOUTS_KEY: &str = "csv_layouts";
 
 /// Key under which the per-project video (ffmpeg) config JSON is stored in
 /// `project_settings` (SPHIN-31).
@@ -106,6 +115,15 @@ fn migrate(conn: &Connection) -> Result<()> {
     }
     if current < 6 {
         migrate_v6(conn)?;
+    }
+    if current < 7 {
+        migrate_v7(conn)?;
+    }
+    if current < 8 {
+        migrate_v8(conn)?;
+    }
+    if current < 9 {
+        migrate_v9(conn)?;
     }
 
     conn.execute(
@@ -283,6 +301,53 @@ fn migrate_v6(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// v7: per-job event history. `jobs` itself only ever holds the *current*
+/// status/error -- every transition function overwrites them -- so this adds
+/// an append-only table with one row per transition a job actually goes
+/// through, for Activity's per-job log.
+fn migrate_v7(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS job_events (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id   INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+            status   TEXT NOT NULL,
+            message  TEXT NOT NULL,
+            at       TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
+        "#,
+    )?;
+    Ok(())
+}
+
+/// v8: `protocol` column on `sftp_profiles`, so a delivery profile can speak
+/// FTPS instead of SFTP -- some stock sites (e.g. Shutterstock) only offer
+/// FTPS. Existing profiles default to `'sftp'`, preserving current behavior.
+fn migrate_v8(conn: &Connection) -> Result<()> {
+    add_column_if_missing(conn, "sftp_profiles", "protocol", "TEXT NOT NULL DEFAULT 'sftp'")?;
+    Ok(())
+}
+
+/// v9: per-site metadata drafts. The `metadata` table keeps the AI-generated
+/// default; each stock site can carry its own edited title/description/
+/// keywords on top of it, chosen in the asset editor's "Preview as" switch.
+fn migrate_v9(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS site_metadata (
+            asset_id      INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+            site_name     TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            updated_at    TEXT NOT NULL,
+            PRIMARY KEY (asset_id, site_name)
+        );
+        "#,
+    )?;
+    Ok(())
+}
+
 /// SQLite has no `ADD COLUMN IF NOT EXISTS`; emulate it via `pragma_table_info`.
 fn add_column_if_missing(
     conn: &Connection,
@@ -435,11 +500,46 @@ pub fn set_job_status(
     status: &str,
     error: Option<&str>,
 ) -> Result<()> {
-    conn.execute(
+    let changed = conn.execute(
         "UPDATE jobs SET status = ?2, error = ?3, updated_at = ?4 WHERE id = ?1",
         params![job_id, status, error, Utc::now().to_rfc3339()],
     )?;
+    if changed > 0 {
+        log_job_event(conn, job_id, status, error.unwrap_or("Completed"))?;
+    }
     Ok(())
+}
+
+/// Record one status-transition event for a job. Append-only, unlike
+/// `jobs.status`/`error` themselves (which each new transition overwrites) --
+/// this is what preserves the history Activity's per-job log shows.
+fn log_job_event(conn: &Connection, job_id: i64, status: &str, message: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO job_events (job_id, status, message, at) VALUES (?1, ?2, ?3, ?4)",
+        params![job_id, status, message, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// A job's full event history, oldest first, for Activity's per-job log.
+pub fn list_job_events(conn: &Connection, job_id: i64) -> Result<Vec<JobEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, job_id, status, message, at FROM job_events WHERE job_id = ?1 ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map(params![job_id], |row| {
+        Ok(JobEvent {
+            id: row.get(0)?,
+            job_id: row.get(1)?,
+            status: row.get(2)?,
+            message: row.get(3)?,
+            at: row.get(4)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
 }
 
 // --- job queue (SPHIN-7) -----------------------------------------------------
@@ -460,8 +560,10 @@ pub fn enqueue_jobs(
              VALUES (?1, ?2, 'pending', 'queue', ?3, 0, ?4, ?4)",
             params![asset_id, job_type, payload_json, now],
         )?;
+        let id = conn.last_insert_rowid();
+        log_job_event(conn, id, "pending", "Queued")?;
         jobs.push(Job {
-            id: conn.last_insert_rowid(),
+            id,
             asset_id,
             job_type: job_type.to_string(),
             status: "pending".to_string(),
@@ -501,6 +603,7 @@ pub fn claim_next_pending_job(conn: &Connection) -> Result<Option<Job>> {
         "UPDATE jobs SET status = 'running', updated_at = ?2 WHERE id = ?1",
         params![job.id, Utc::now().to_rfc3339()],
     )?;
+    log_job_event(conn, job.id, "running", &format!("Started (attempt {})", job.attempts + 1))?;
     Ok(Some(Job {
         status: "running".to_string(),
         ..job
@@ -510,11 +613,14 @@ pub fn claim_next_pending_job(conn: &Connection) -> Result<Option<Job>> {
 /// Reset a failed (or stuck) queue job back to `pending` for an immediate
 /// manual retry, clearing its error/backoff and bumping `attempts`. SPHIN-30.
 pub fn retry_job(conn: &Connection, job_id: i64) -> Result<()> {
-    conn.execute(
+    let changed = conn.execute(
         "UPDATE jobs SET status = 'pending', error = NULL, not_before = NULL, attempts = attempts + 1, updated_at = ?2
          WHERE id = ?1 AND source = 'queue'",
         params![job_id, Utc::now().to_rfc3339()],
     )?;
+    if changed > 0 {
+        log_job_event(conn, job_id, "pending", "Manual retry requested")?;
+    }
     Ok(())
 }
 
@@ -523,12 +629,59 @@ pub fn retry_job(conn: &Connection, job_id: i64) -> Result<()> {
 /// the meantime so the dashboard shows why it's about to retry.
 pub fn schedule_retry(conn: &Connection, job_id: i64, delay_secs: i64, error: &str) -> Result<()> {
     let not_before = (Utc::now() + chrono::Duration::seconds(delay_secs)).to_rfc3339();
-    conn.execute(
+    let changed = conn.execute(
         "UPDATE jobs SET status = 'pending', attempts = attempts + 1, not_before = ?2, error = ?3, updated_at = ?4
          WHERE id = ?1",
         params![job_id, not_before, error, Utc::now().to_rfc3339()],
     )?;
+    if changed > 0 {
+        log_job_event(
+            conn,
+            job_id,
+            "pending",
+            &format!("Attempt failed: {error}. Retrying in {delay_secs}s."),
+        )?;
+    }
     Ok(())
+}
+
+/// Cancel a queue job that hasn't started yet, before the worker ever claims
+/// it. Returns `false` (a no-op) if the job wasn't `pending` -- either it's
+/// already running (the caller falls back to signalling the worker) or it's
+/// already in a terminal state.
+pub fn cancel_pending_job(conn: &Connection, job_id: i64) -> Result<bool> {
+    let changed = conn.execute(
+        "UPDATE jobs SET status = 'cancelled', updated_at = ?2 WHERE id = ?1 AND status = 'pending'",
+        params![job_id, Utc::now().to_rfc3339()],
+    )?;
+    if changed > 0 {
+        log_job_event(conn, job_id, "cancelled", "Cancelled by user")?;
+    }
+    Ok(changed > 0)
+}
+
+/// Delete finished queue jobs (and, via cascade, their event history). Only
+/// jobs in a terminal state (`done`/`failed`/`cancelled`) are removed, so a
+/// pending or running job is never pulled out from under the worker.
+/// `job_ids = None` removes every queue job with `status`. Returns how many
+/// rows were deleted.
+pub fn delete_finished_jobs(conn: &Connection, job_ids: Option<&[i64]>, status: Option<&str>) -> Result<usize> {
+    const TERMINAL: &str = "status IN ('done', 'failed', 'cancelled') AND source = 'queue'";
+    let mut removed = 0;
+    match job_ids {
+        Some(ids) => {
+            for id in ids {
+                removed += conn.execute(&format!("DELETE FROM jobs WHERE id = ?1 AND {TERMINAL}"), params![id])?;
+            }
+        }
+        None => {
+            removed += conn.execute(
+                &format!("DELETE FROM jobs WHERE (?1 IS NULL OR status = ?1) AND {TERMINAL}"),
+                params![status],
+            )?;
+        }
+    }
+    Ok(removed)
 }
 
 /// Queue jobs (batch work only, not the direct-command audit log), most
@@ -553,6 +706,7 @@ pub struct JobCounts {
     pub running: i64,
     pub done: i64,
     pub failed: i64,
+    pub cancelled: i64,
 }
 
 pub fn queue_job_counts(conn: &Connection) -> Result<JobCounts> {
@@ -567,6 +721,7 @@ pub fn queue_job_counts(conn: &Connection) -> Result<JobCounts> {
             "running" => counts.running = count,
             "done" => counts.done = count,
             "failed" => counts.failed = count,
+            "cancelled" => counts.cancelled = count,
             _ => {}
         }
     }
@@ -578,11 +733,13 @@ pub fn queue_job_counts(conn: &Connection) -> Result<JobCounts> {
 /// Create a connection profile. The password is not part of this call --
 /// callers save it separately via [`crate::secrets::set_secret`] under the
 /// returned profile's `credential_key`.
+#[allow(clippy::too_many_arguments)]
 pub fn create_sftp_profile(
     conn: &Connection,
     project_id: i64,
     name: &str,
     site: &str,
+    protocol: &str,
     host: &str,
     port: i64,
     username: &str,
@@ -591,9 +748,9 @@ pub fn create_sftp_profile(
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO sftp_profiles
-            (project_id, name, site, host, port, username, remote_dir, credential_key, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, ?8)",
-        params![project_id, name, site, host, port, username, remote_dir, now],
+            (project_id, name, site, protocol, host, port, username, remote_dir, credential_key, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', ?9, ?9)",
+        params![project_id, name, site, protocol, host, port, username, remote_dir, now],
     )?;
     let id = conn.last_insert_rowid();
     // The credential key is derived from the row id, so it can't be chosen
@@ -608,6 +765,7 @@ pub fn create_sftp_profile(
         project_id,
         name: name.to_string(),
         site: site.to_string(),
+        protocol: protocol.to_string(),
         host: host.to_string(),
         port,
         username: username.to_string(),
@@ -621,7 +779,7 @@ pub fn create_sftp_profile(
 
 pub fn list_sftp_profiles(conn: &Connection, project_id: i64) -> Result<Vec<SftpProfileRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, name, site, host, port, username, remote_dir, credential_key, host_key_fingerprint, created_at, updated_at
+        "SELECT id, project_id, name, site, protocol, host, port, username, remote_dir, credential_key, host_key_fingerprint, created_at, updated_at
          FROM sftp_profiles WHERE project_id = ?1 ORDER BY id ASC",
     )?;
     let rows = stmt.query_map(params![project_id], row_to_sftp_profile)?;
@@ -634,7 +792,7 @@ pub fn list_sftp_profiles(conn: &Connection, project_id: i64) -> Result<Vec<Sftp
 
 pub fn get_sftp_profile(conn: &Connection, id: i64) -> Result<Option<SftpProfileRecord>> {
     conn.query_row(
-        "SELECT id, project_id, name, site, host, port, username, remote_dir, credential_key, host_key_fingerprint, created_at, updated_at
+        "SELECT id, project_id, name, site, protocol, host, port, username, remote_dir, credential_key, host_key_fingerprint, created_at, updated_at
          FROM sftp_profiles WHERE id = ?1",
         params![id],
         row_to_sftp_profile,
@@ -651,15 +809,16 @@ pub fn update_sftp_profile(
     id: i64,
     name: &str,
     site: &str,
+    protocol: &str,
     host: &str,
     port: i64,
     username: &str,
     remote_dir: &str,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE sftp_profiles SET name = ?2, site = ?3, host = ?4, port = ?5, username = ?6, remote_dir = ?7, updated_at = ?8
+        "UPDATE sftp_profiles SET name = ?2, site = ?3, protocol = ?4, host = ?5, port = ?6, username = ?7, remote_dir = ?8, updated_at = ?9
          WHERE id = ?1",
-        params![id, name, site, host, port, username, remote_dir, Utc::now().to_rfc3339()],
+        params![id, name, site, protocol, host, port, username, remote_dir, Utc::now().to_rfc3339()],
     )?;
     Ok(())
 }
@@ -793,6 +952,17 @@ pub fn get_analysis_configs(
     Ok(configs)
 }
 
+/// Replace a project's whole per-provider config map without touching which
+/// provider is active (used when rewriting stored configs in place).
+pub fn set_analysis_configs(
+    conn: &Connection,
+    project_id: i64,
+    configs: &HashMap<String, AnalysisConfig>,
+) -> Result<()> {
+    let json = serde_json::to_string(configs)?;
+    set_project_setting(conn, project_id, ANALYSIS_CONFIGS_KEY, &json)
+}
+
 // --- analyses (SPHIN-2) --------------------------------------------------------
 
 pub fn insert_analysis(
@@ -910,6 +1080,71 @@ pub fn remove_custom_site_profile(
     Ok(profiles)
 }
 
+fn get_hidden_built_in_sites(conn: &Connection, project_id: i64) -> Result<Vec<String>> {
+    match get_project_setting(conn, project_id, HIDDEN_BUILT_IN_SITES_KEY)? {
+        Some(json) => Ok(serde_json::from_str(&json)?),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn set_hidden_built_in_sites(conn: &Connection, project_id: i64, names: &[String]) -> Result<()> {
+    let json = serde_json::to_string(names)?;
+    set_project_setting(conn, project_id, HIDDEN_BUILT_IN_SITES_KEY, &json)
+}
+
+fn built_in_named(name: &str) -> Option<LimiterProfile> {
+    LimiterProfile::built_ins()
+        .into_iter()
+        .find(|b| b.name.eq_ignore_ascii_case(name.trim()))
+}
+
+/// Every site profile visible in a project: the built-in presets the user
+/// hasn't deleted, followed by the project's custom profiles.
+pub fn list_site_profiles(conn: &Connection, project_id: i64) -> Result<Vec<LimiterProfile>> {
+    let hidden = get_hidden_built_in_sites(conn, project_id)?;
+    let mut profiles: Vec<LimiterProfile> = LimiterProfile::built_ins()
+        .into_iter()
+        .filter(|b| !hidden.iter().any(|h| h.eq_ignore_ascii_case(&b.name)))
+        .collect();
+    profiles.extend(get_custom_site_profiles(conn, project_id)?);
+    Ok(profiles)
+}
+
+/// Add a site profile. A name matching a deleted built-in preset restores
+/// that preset (with its stock limits); anything else is added as a custom
+/// profile. Returns the full visible list.
+pub fn add_site_profile(conn: &Connection, project_id: i64, profile: LimiterProfile) -> Result<Vec<LimiterProfile>> {
+    if let Some(built_in) = built_in_named(&profile.name) {
+        let mut hidden = get_hidden_built_in_sites(conn, project_id)?;
+        if !hidden.iter().any(|h| h.eq_ignore_ascii_case(&built_in.name)) {
+            return Err(CoreError::Validation(format!(
+                "\"{}\" is already a site profile",
+                built_in.name
+            )));
+        }
+        hidden.retain(|h| !h.eq_ignore_ascii_case(&built_in.name));
+        set_hidden_built_in_sites(conn, project_id, &hidden)?;
+    } else {
+        add_custom_site_profile(conn, project_id, profile)?;
+    }
+    list_site_profiles(conn, project_id)
+}
+
+/// Delete a site profile: a built-in preset is hidden for this project, a
+/// custom one is removed outright. Returns the full visible list.
+pub fn remove_site_profile(conn: &Connection, project_id: i64, name: &str) -> Result<Vec<LimiterProfile>> {
+    if let Some(built_in) = built_in_named(name) {
+        let mut hidden = get_hidden_built_in_sites(conn, project_id)?;
+        if !hidden.iter().any(|h| h.eq_ignore_ascii_case(&built_in.name)) {
+            hidden.push(built_in.name);
+            set_hidden_built_in_sites(conn, project_id, &hidden)?;
+        }
+    } else {
+        remove_custom_site_profile(conn, project_id, name)?;
+    }
+    list_site_profiles(conn, project_id)
+}
+
 /// The per-project embed (exiftool) configuration (SPHIN-20), or `None` if
 /// the project has never had one saved (callers should fall back to
 /// [`EmbedConfig::default`]).
@@ -942,6 +1177,17 @@ pub fn set_keyword_config(
 ) -> Result<()> {
     let json = serde_json::to_string(config)?;
     set_project_setting(conn, project_id, KEYWORD_CONFIG_KEY, &json)
+}
+
+/// The project's CSV column layouts as raw JSON, or `None` if none were saved.
+pub fn get_csv_layouts(conn: &Connection, project_id: i64) -> Result<Option<String>> {
+    get_project_setting(conn, project_id, CSV_LAYOUTS_KEY)
+}
+
+pub fn set_csv_layouts(conn: &Connection, project_id: i64, json: &str) -> Result<()> {
+    // Reject malformed JSON here rather than failing on the next load.
+    serde_json::from_str::<serde_json::Value>(json)?;
+    set_project_setting(conn, project_id, CSV_LAYOUTS_KEY, json)
 }
 
 /// The per-project video (ffmpeg) configuration (SPHIN-31), or `None` if the
@@ -1087,6 +1333,75 @@ pub fn latest_metadata_for_asset(
     .map_err(Into::into)
 }
 
+// --- per-site metadata drafts ------------------------------------------------
+
+/// One site's edited metadata for an asset.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SiteMetadata {
+    pub site_name: String,
+    pub metadata: GeneratedMetadata,
+    pub updated_at: String,
+}
+
+/// Insert or replace `site_name`'s draft for an asset. An already-embedded
+/// asset drops back to `metadata_generated`, since its file no longer matches
+/// what's been edited; uploaded assets keep their status.
+pub fn upsert_site_metadata(
+    conn: &Connection,
+    asset_id: i64,
+    site_name: &str,
+    meta: &GeneratedMetadata,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO site_metadata (asset_id, site_name, metadata_json, updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(asset_id, site_name) DO UPDATE SET metadata_json = excluded.metadata_json, updated_at = excluded.updated_at",
+        params![asset_id, site_name, serde_json::to_string(meta)?, now],
+    )?;
+    conn.execute(
+        "UPDATE assets SET status = 'metadata_generated', updated_at = ?2 WHERE id = ?1 AND status = 'embedded'",
+        params![asset_id, now],
+    )?;
+    Ok(())
+}
+
+pub fn list_site_metadata(conn: &Connection, asset_id: i64) -> Result<Vec<SiteMetadata>> {
+    let mut stmt = conn.prepare(
+        "SELECT site_name, metadata_json, updated_at FROM site_metadata WHERE asset_id = ?1 ORDER BY site_name",
+    )?;
+    let rows = stmt.query_map(params![asset_id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (site_name, json, updated_at) = row?;
+        out.push(SiteMetadata { site_name, metadata: serde_json::from_str(&json)?, updated_at });
+    }
+    Ok(out)
+}
+
+pub fn get_site_metadata(conn: &Connection, asset_id: i64, site_name: &str) -> Result<Option<GeneratedMetadata>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT metadata_json FROM site_metadata WHERE asset_id = ?1 AND site_name = ?2",
+            params![asset_id, site_name],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(match json {
+        Some(j) => Some(serde_json::from_str(&j)?),
+        None => None,
+    })
+}
+
+pub fn delete_site_metadata(conn: &Connection, asset_id: i64, site_name: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM site_metadata WHERE asset_id = ?1 AND site_name = ?2",
+        params![asset_id, site_name],
+    )?;
+    Ok(())
+}
+
 // --- row mappers ------------------------------------------------------------
 
 fn row_to_asset(row: &rusqlite::Row) -> rusqlite::Result<Asset> {
@@ -1124,14 +1439,15 @@ fn row_to_sftp_profile(row: &rusqlite::Row) -> rusqlite::Result<SftpProfileRecor
         project_id: row.get(1)?,
         name: row.get(2)?,
         site: row.get(3)?,
-        host: row.get(4)?,
-        port: row.get(5)?,
-        username: row.get(6)?,
-        remote_dir: row.get(7)?,
-        credential_key: row.get(8)?,
-        host_key_fingerprint: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        protocol: row.get(4)?,
+        host: row.get(5)?,
+        port: row.get(6)?,
+        username: row.get(7)?,
+        remote_dir: row.get(8)?,
+        credential_key: row.get(9)?,
+        host_key_fingerprint: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -1375,6 +1691,30 @@ mod tests {
     }
 
     #[test]
+    fn built_in_site_profiles_can_be_deleted_and_restored() {
+        let conn = open_in_memory().unwrap();
+        let all = LimiterProfile::built_ins().len();
+        assert_eq!(list_site_profiles(&conn, 1).unwrap().len(), all);
+
+        let profiles = remove_site_profile(&conn, 1, "Shutterstock").unwrap();
+        assert_eq!(profiles.len(), all - 1);
+        assert!(!profiles.iter().any(|p| p.name == "Shutterstock"));
+
+        // Re-adding a deleted built-in restores it rather than creating a custom copy.
+        let profiles = add_site_profile(&conn, 1, LimiterProfile::custom("shutterstock")).unwrap();
+        assert_eq!(profiles.len(), all);
+        assert!(get_custom_site_profiles(&conn, 1).unwrap().is_empty());
+
+        // A built-in that's still visible can't be added twice.
+        assert!(add_site_profile(&conn, 1, LimiterProfile::custom("Pond5")).is_err());
+
+        let profiles = add_site_profile(&conn, 1, LimiterProfile::custom("My Site")).unwrap();
+        assert_eq!(profiles.len(), all + 1);
+        let profiles = remove_site_profile(&conn, 1, "My Site").unwrap();
+        assert_eq!(profiles.len(), all);
+    }
+
+    #[test]
     fn custom_site_profile_rejects_blank_or_built_in_names() {
         let conn = open_in_memory().unwrap();
         assert!(add_custom_site_profile(&conn, 1, LimiterProfile::custom("  ")).is_err());
@@ -1442,6 +1782,78 @@ mod tests {
     }
 
     #[test]
+    fn cancel_pending_job_marks_it_cancelled_and_it_is_never_claimed() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let jobs = enqueue_jobs(&conn, &[a.id, a.id], "upload", "{}").unwrap();
+
+        assert!(cancel_pending_job(&conn, jobs[0].id).unwrap());
+
+        let claimed = claim_next_pending_job(&conn).unwrap().unwrap();
+        assert_eq!(claimed.id, jobs[1].id, "the cancelled job must never be claimed");
+
+        let counts = queue_job_counts(&conn).unwrap();
+        assert_eq!(counts.cancelled, 1);
+    }
+
+    #[test]
+    fn cancel_pending_job_is_a_no_op_on_a_job_that_already_finished() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let job = &enqueue_jobs(&conn, &[a.id], "analyze", "{}").unwrap()[0];
+        claim_next_pending_job(&conn).unwrap();
+        set_job_status(&conn, job.id, "done", None).unwrap();
+
+        assert!(!cancel_pending_job(&conn, job.id).unwrap());
+        let jobs = list_queue_jobs(&conn, 10).unwrap();
+        assert_eq!(jobs[0].status, "done");
+    }
+
+    #[test]
+    fn site_metadata_round_trips_and_unembeds_the_asset() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        set_asset_status(&conn, a.id, "embedded").unwrap();
+        let meta = GeneratedMetadata {
+            title: "Sunset".into(),
+            description: "Over the sea".into(),
+            keywords: vec!["sunset".into(), "sea".into()],
+            profile: "Adobe Stock".into(),
+            meets_minimum_keywords: true,
+        };
+        upsert_site_metadata(&conn, a.id, "Adobe Stock", &meta).unwrap();
+        let edited = GeneratedMetadata { title: "Sunset 2".into(), ..meta.clone() };
+        upsert_site_metadata(&conn, a.id, "Adobe Stock", &edited).unwrap();
+
+        let all = list_site_metadata(&conn, a.id).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].metadata.title, "Sunset 2");
+        assert_eq!(get_asset(&conn, a.id).unwrap().unwrap().status, "metadata_generated");
+
+        delete_site_metadata(&conn, a.id, "Adobe Stock").unwrap();
+        assert!(get_site_metadata(&conn, a.id, "Adobe Stock").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_finished_jobs_removes_only_terminal_jobs() {
+        let conn = open_in_memory().unwrap();
+        let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
+        let jobs = enqueue_jobs(&conn, &[a.id, a.id, a.id], "analyze", "{}").unwrap();
+        set_job_status(&conn, jobs[0].id, "done", None).unwrap();
+        set_job_status(&conn, jobs[1].id, "failed", Some("boom")).unwrap();
+
+        // A pending job is never removed, even when named explicitly.
+        assert_eq!(delete_finished_jobs(&conn, Some(&[jobs[2].id]), None).unwrap(), 0);
+        assert_eq!(delete_finished_jobs(&conn, None, Some("done")).unwrap(), 1);
+        assert!(list_job_events(&conn, jobs[0].id).unwrap().is_empty());
+
+        let counts = queue_job_counts(&conn).unwrap();
+        assert_eq!(counts.done, 0);
+        assert_eq!(counts.failed, 1);
+        assert_eq!(counts.pending, 1);
+    }
+
+    #[test]
     fn queue_job_counts_tally_by_status() {
         let conn = open_in_memory().unwrap();
         let a = insert_asset(&conn, "/tmp/a.jpg", "h", 1, "image").unwrap();
@@ -1497,7 +1909,7 @@ mod tests {
         let conn = open_in_memory().unwrap();
         assert!(list_sftp_profiles(&conn, 1).unwrap().is_empty());
 
-        let profile = create_sftp_profile(&conn, 1, "Adobe Stock", "adobe_stock", "sftp.adobe.io", 22, "alice", "/incoming")
+        let profile = create_sftp_profile(&conn, 1, "Adobe Stock", "adobe_stock", "sftp", "sftp.adobe.io", 22, "alice", "/incoming")
             .unwrap();
         assert_eq!(profile.credential_key, format!("sftp-profile-{}", profile.id));
 
@@ -1506,7 +1918,7 @@ mod tests {
         assert!(fetched.host_key_fingerprint.is_none());
 
         set_sftp_host_key_fingerprint(&conn, profile.id, "abc123").unwrap();
-        update_sftp_profile(&conn, profile.id, "Adobe Stock (renamed)", "adobe_stock", "sftp.adobe.io", 22, "alice", "/incoming/new")
+        update_sftp_profile(&conn, profile.id, "Adobe Stock (renamed)", "adobe_stock", "sftp", "sftp.adobe.io", 22, "alice", "/incoming/new")
             .unwrap();
         let updated = get_sftp_profile(&conn, profile.id).unwrap().unwrap();
         assert_eq!(updated.name, "Adobe Stock (renamed)");

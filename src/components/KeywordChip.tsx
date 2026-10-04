@@ -1,4 +1,4 @@
-import { heatColors, keywordHeat, type Keyword } from "../lib/heat";
+import { USER_ADDED_COLORS, heatColors, keywordHeat, type Keyword } from "../lib/heat";
 
 /** Compact chip for inspectors/triage: word + a small mono score. */
 export function CompactChip({ kw }: { kw: Keyword }) {
@@ -30,17 +30,20 @@ export function EditableChip({
   dragProps: React.HTMLAttributes<HTMLSpanElement>;
 }) {
   const score = keywordHeat(kw);
-  const colors = heatColors(score ?? 0);
+  const colors = kw.userAdded ? USER_ADDED_COLORS : heatColors(score ?? 0);
+  // Merge rather than let dragProps.className (e.g. "kw-dragging") replace
+  // the chip's own classes -- spreading it last used to wipe all chip styling.
+  const { className: extraClass, ...rest } = dragProps;
   return (
     <span
-      className="kw-chip kw-chip--editable"
+      {...rest}
+      className={`kw-chip kw-chip--editable${extraClass ? ` ${extraClass}` : ""}`}
       style={{ background: colors.bg, borderColor: colors.border, color: colors.text }}
       data-index={index}
-      {...dragProps}
     >
       <span className={`kw-handle${isTopByHeat ? " kw-handle--top" : ""}`}>⠿</span>
       <span className="kw-word">{kw.word}</span>
-      <span className="kw-score">{score ?? "—"}</span>
+      {kw.userAdded ? null : <span className="kw-score">{score ?? "—"}</span>}
       <button className="kw-remove" onClick={onRemove} aria-label={`Remove ${kw.word}`}>
         ×
       </button>

@@ -1,43 +1,38 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { NavBar } from "../components/NavBar";
 import { StatusStrip } from "../components/StatusStrip";
-import { Toggle, SectionLabel } from "../components/Toggle";
-import { useApp, BLANK_SFTP_DRAFT, type SftpDraft } from "../state/AppContext";
-import type { LimiterProfile, SftpSite } from "../lib/api";
-
-function matchSftp(sites: ReturnType<typeof useApp>["sftpProfiles"], name: string) {
-  const asSite: SftpSite = name === "Adobe Stock" ? "adobe_stock" : "generic";
-  return (
-    sites.find((s) => asSite === "adobe_stock" && s.site === "adobe_stock") ??
-    sites.find((s) => s.name.toLowerCase() === name.toLowerCase())
-  );
-}
+import { Toggle } from "../components/Toggle";
+import { useApp, deliveryProfileFor, BLANK_SFTP_DRAFT, type SftpDraft } from "../state/AppContext";
+import type { LimiterProfile } from "../lib/api";
+import { CSV_SOURCES, csvFormatFor, type CsvColumn, type CsvSource } from "../lib/csvFormats";
+import { deliverySupportFor } from "../lib/delivery";
 
 export function SitesScreen() {
   const app = useApp();
   const [selectedName, setSelectedName] = useState("");
   const [draftProfile, setDraftProfile] = useState<LimiterProfile | null>(null);
-  const [sftpDraft, setSftpDraft] = useState<SftpDraft>(BLANK_SFTP_DRAFT);
   const [saving, setSaving] = useState(false);
   const [addingSite, setAddingSite] = useState(false);
   const [newSiteName, setNewSiteName] = useState("");
 
-  function isCustomProfile(name: string) {
-    return !app.builtInProfiles.some((b) => b.name === name);
-  }
-
   async function handleAddSite() {
     const name = newSiteName.trim();
     if (!name) return;
-    await app.createSiteProfile(name);
+    const added = await app.createSiteProfile(name);
+    if (!added) return;
     setNewSiteName("");
     setAddingSite(false);
-    setSelectedName(name);
+    setSelectedName(added);
   }
 
   async function handleRemoveSite(e: MouseEvent, name: string) {
     e.stopPropagation();
-    if (!window.confirm(`Remove the "${name}" site profile? This does not affect assets already targeting it.`)) return;
+    const transport = deliveryProfileFor(app.sftpProfiles, name);
+    const message =
+      `Remove the "${name}" site profile?` +
+      (transport ? " Its delivery settings and saved password are removed too." : "") +
+      " This does not affect assets already targeting it.";
+    if (!window.confirm(message)) return;
     await app.deleteSiteProfile(name);
     if (selectedName === name) setSelectedName("");
   }
@@ -53,22 +48,8 @@ export function SitesScreen() {
   useEffect(() => {
     if (!selected) return;
     setDraftProfile(selected);
-    const match = matchSftp(app.sftpProfiles, selected.name);
-    setSftpDraft(
-      match
-        ? {
-            name: match.name,
-            site: match.site,
-            host: match.host,
-            port: match.port,
-            username: match.username,
-            remote_dir: match.remote_dir,
-            password: "",
-          }
-        : { ...BLANK_SFTP_DRAFT, name: selected.name, site: selected.name === "Adobe Stock" ? "adobe_stock" : "generic" }
-    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.name, app.sftpProfiles]);
+  }, [selected?.name]);
 
   if (!selected || !draftProfile) {
     return (
@@ -82,14 +63,7 @@ export function SitesScreen() {
 
   const isDefault = app.activeProfile?.name === selected.name;
   const isEnabled = app.enabledProfileNames.has(selected.name);
-  const existingSftp = matchSftp(app.sftpProfiles, selected.name);
-  const keywordCreds =
-    selected.name === "Shutterstock"
-      ? app.keywordConfig.shutterstock
-      : selected.name === "Adobe Stock"
-        ? app.keywordConfig.adobe_stock
-        : undefined;
-  const supportsKeywordProvider = selected.name === "Shutterstock" || selected.name === "Adobe Stock";
+  const enabledCount = app.enabledProfileNames.size;
 
   async function saveProfile() {
     setSaving(true);
@@ -99,34 +73,6 @@ export function SitesScreen() {
       setSaving(false);
     }
   }
-
-  async function saveTransport() {
-    setSaving(true);
-    try {
-      if (existingSftp) await app.editSftpProfile(existingSftp.id, sftpDraft);
-      else await app.addSftpProfile(sftpDraft);
-    } catch (err) {
-      app.setStatus(`Could not save transport: ${String(err)}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function toggleKeywordProvider(enabled: boolean) {
-    const next = { ...app.keywordConfig };
-    if (selected.name === "Shutterstock") next.shutterstock = enabled ? next.shutterstock ?? { api_key: "", base_url: "" } : null;
-    if (selected.name === "Adobe Stock") next.adobe_stock = enabled ? next.adobe_stock ?? { api_key: "", base_url: "" } : null;
-    void app.saveKeywordConfig(next);
-  }
-
-  function patchKeywordKey(api_key: string) {
-    const next = { ...app.keywordConfig };
-    if (selected.name === "Shutterstock") next.shutterstock = { api_key, base_url: "" };
-    if (selected.name === "Adobe Stock") next.adobe_stock = { api_key, base_url: "" };
-    void app.saveKeywordConfig(next);
-  }
-
-  const enabledCount = app.enabledProfileNames.size;
 
   return (
     <div className="app-shell">
@@ -140,35 +86,29 @@ export function SitesScreen() {
       <div className="sites-screen">
         <div className="sites-list">
           {app.limiterPresets.map((p) => {
-            const sftp = matchSftp(app.sftpProfiles, p.name);
             const enabled = app.enabledProfileNames.has(p.name);
-            const statusColor = !enabled ? "var(--off)" : sftp?.host_key_fingerprint ? "var(--ok)" : sftp ? "var(--warn)" : "var(--off)";
-            const statusWord = !enabled ? "off" : sftp?.host_key_fingerprint ? "connected" : sftp ? "not yet connected" : "no transport";
             return (
               <div
                 key={p.name}
                 className={`site-row${p.name === selected.name ? " site-row--selected" : ""}`}
                 onClick={() => setSelectedName(p.name)}
               >
-                <span className="site-status-dot" style={{ background: statusColor }} />
+                <span className="site-status-dot" style={{ background: enabled ? "var(--ok)" : "var(--off)" }} />
                 <div className="site-row-body">
                   <span className="site-row-name">
-                    {p.name} <span className="site-row-status">{statusWord}</span>
+                    {p.name} <span className="site-row-status">{enabled ? "enabled" : "off"}</span>
                   </span>
                   <span className="site-row-limits">
                     title ≤ {p.max_title_chars} · desc ≤ {p.max_description_chars} · {p.min_keywords}–{p.max_keywords} keywords
                   </span>
-                  <span className="site-row-transport">{sftp ? `SFTP · ${sftp.host}` : "not configured"}</span>
                 </div>
-                {isCustomProfile(p.name) && (
-                  <button
-                    className="site-row-remove"
-                    title={`Remove "${p.name}"`}
-                    onClick={(e) => void handleRemoveSite(e, p.name)}
-                  >
-                    ✕
-                  </button>
-                )}
+                <button
+                  className="site-row-remove"
+                  title={`Remove "${p.name}"`}
+                  onClick={(e) => void handleRemoveSite(e, p.name)}
+                >
+                  ✕
+                </button>
               </div>
             );
           })}
@@ -255,93 +195,318 @@ export function SitesScreen() {
             </div>
           </div>
 
-          <div className="card">
-            <SectionLabel>Upload transport</SectionLabel>
-            <div className="transport-grid" style={{ marginTop: 12 }}>
-              <div className="field">
-                <span className="field-label">Host</span>
-                <input
-                  className="mono"
-                  value={sftpDraft.host}
-                  onChange={(e) => setSftpDraft({ ...sftpDraft, host: e.target.value })}
-                  placeholder="sftp.example.com"
-                />
-              </div>
-              <div className="field">
-                <span className="field-label">Port</span>
-                <input
-                  type="number"
-                  value={sftpDraft.port}
-                  onChange={(e) => setSftpDraft({ ...sftpDraft, port: Number(e.target.value) || 22 })}
-                />
-              </div>
-              <div className="field">
-                <span className="field-label">Username</span>
-                <input value={sftpDraft.username} onChange={(e) => setSftpDraft({ ...sftpDraft, username: e.target.value })} />
-              </div>
-              <div className="field">
-                <span className="field-label">Remote directory</span>
-                <input value={sftpDraft.remote_dir} onChange={(e) => setSftpDraft({ ...sftpDraft, remote_dir: e.target.value })} />
-              </div>
-              <div className="field">
-                <span className="field-label">Password {existingSftp && <span className="hint">(blank = keep existing)</span>}</span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={sftpDraft.password}
-                  onChange={(e) => setSftpDraft({ ...sftpDraft, password: e.target.value })}
-                />
-              </div>
-            </div>
-            <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btn-primary" onClick={() => void saveTransport()} disabled={saving || !sftpDraft.host || !sftpDraft.username}>
-                {existingSftp ? "Save transport" : "Add transport"}
-              </button>
-              <button className="btn-secondary" disabled title="Connection testing verifies on first upload for now">
-                Test connection
-              </button>
-            </div>
-            {existingSftp && (
-              <div className="test-result">
-                <span
-                  className="test-result-dot"
-                  style={{ background: existingSftp.host_key_fingerprint ? "var(--ok)" : "var(--off)" }}
-                />
-                <span style={{ color: existingSftp.host_key_fingerprint ? "var(--ok-ink)" : "var(--faint)" }}>
-                  {existingSftp.host_key_fingerprint ? `Host key verified · fingerprint ${existingSftp.host_key_fingerprint.slice(0, 16)}…` : "Not yet connected — verifies on first upload."}
-                </span>
-              </div>
-            )}
-          </div>
+          <DeliveryCard siteName={selected.name} />
 
-          <div className="card">
-            <SectionLabel>Demand data used for keyword heat</SectionLabel>
-            {!supportsKeywordProvider ? (
-              <p className="demand-note" style={{ marginTop: 10 }}>
-                Keyword suggestions aren't available for {selected.name} yet — only Shutterstock and Adobe Stock are
-                wired up.
-              </p>
-            ) : (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-                  <span className={`pill${keywordCreds ? " pill--active" : ""}`}>{selected.name} search volume</span>
-                  <Toggle checked={Boolean(keywordCreds)} onChange={toggleKeywordProvider} />
-                </div>
-                {keywordCreds && (
-                  <div className="field" style={{ marginTop: 10, maxWidth: 320 }}>
-                    <span className="field-label">API key</span>
-                    <input type="password" autoComplete="off" value={keywordCreds.api_key} onChange={(e) => patchKeywordKey(e.target.value)} />
-                  </div>
-                )}
-                <p className="demand-note" style={{ marginTop: 10 }}>Used for keyword heat's demand half and the "Enrich +" action.</p>
-              </>
-            )}
-          </div>
+          <CsvFormatCard siteName={selected.name} />
+
+          <p className="sites-list-note">
+            Keyword-demand API keys for this site live in{" "}
+            <button className="btn-link" style={{ display: "inline" }} onClick={() => app.setScreen("connections")}>
+              Connections →
+            </button>
+          </p>
         </div>
       </div>
       <StatusStrip>
         {enabledCount} of {app.limiterPresets.length} profiles enabled · strictest limit wins when several are enabled
       </StatusStrip>
+    </div>
+  );
+}
+
+/** Editable CSV export layout for one site: add, remove, rename, reorder
+ * (drag or arrows) and pick what fills each column. */
+function CsvFormatCard({ siteName }: { siteName: string }) {
+  const app = useApp();
+  const format = csvFormatFor(siteName, app.csvLayouts);
+  const [draft, setDraft] = useState<CsvColumn[]>(format.columns);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(csvFormatFor(siteName, app.csvLayouts).columns.map((c) => ({ ...c })));
+  }, [siteName, app.csvLayouts]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(format.columns);
+  const headers = draft.map((c) => c.header.trim());
+  const hasEmpty = headers.some((h) => !h);
+  const hasDuplicate = new Set(headers.map((h) => h.toLowerCase())).size !== headers.length;
+  const invalid = draft.length === 0 || hasEmpty || hasDuplicate;
+
+  function patch(index: number, next: Partial<CsvColumn>) {
+    setDraft((d) => d.map((c, i) => (i === index ? { ...c, ...next } : c)));
+  }
+
+  function move(from: number, to: number) {
+    if (to < 0 || to >= draft.length || from === to) return;
+    setDraft((d) => {
+      const next = [...d];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  }
+
+  async function save(columns: CsvColumn[] | null) {
+    setSaving(true);
+    try {
+      await app.saveCsvLayout(siteName, columns && columns.map((c) => ({ ...c, header: c.header.trim() })));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function reset() {
+    if (!window.confirm(`Reset the ${siteName} CSV layout to its built-in default? Your column edits are lost.`)) return;
+    void save(null);
+  }
+
+  return (
+    <div className="card">
+      <div className="site-card-head">
+        <h3 className="card-title">CSV format</h3>
+        <span className="chip-tag chip-tag--neutral">{draft.length} columns</span>
+        {format.customized && <span className="chip-tag chip-tag--ok">customized</span>}
+      </div>
+      <div className="csv-editor">
+        {draft.map((c, i) => (
+          <div
+            key={i}
+            className={`csv-editor-row${dragIndex === i ? " csv-editor-row--dragging" : ""}`}
+            draggable
+            onDragStart={(e) => {
+              setDragIndex(i);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (dragIndex !== null && dragIndex !== i) {
+                move(dragIndex, i);
+                setDragIndex(i);
+              }
+            }}
+            onDragEnd={() => setDragIndex(null)}
+          >
+            <span className="csv-editor-handle" title="Drag to reorder">
+              ⠿
+            </span>
+            <span className="csv-editor-index">{i + 1}</span>
+            <input
+              className={`mono${!c.header.trim() ? " input--invalid" : ""}`}
+              value={c.header}
+              placeholder="Column header"
+              onChange={(e) => patch(i, { header: e.target.value })}
+            />
+            <select value={c.source} onChange={(e) => patch(i, { source: e.target.value as CsvSource })}>
+              {CSV_SOURCES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <button className="btn-quiet" title="Move up" disabled={i === 0} onClick={() => move(i, i - 1)}>
+              ↑
+            </button>
+            <button className="btn-quiet" title="Move down" disabled={i === draft.length - 1} onClick={() => move(i, i + 1)}>
+              ↓
+            </button>
+            <button
+              className="btn-quiet"
+              title="Remove column"
+              style={{ color: "var(--danger)" }}
+              onClick={() => setDraft((d) => d.filter((_, j) => j !== i))}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {draft.length === 0 && <div className="hint">No columns — add at least one.</div>}
+      </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn-secondary" onClick={() => setDraft((d) => [...d, { header: "", source: "blank" }])}>
+          + Add column
+        </button>
+        <span className="navbar-spacer" />
+        {dirty && (
+          <button className="btn-quiet" onClick={() => setDraft(format.columns.map((c) => ({ ...c })))} disabled={saving}>
+            Discard
+          </button>
+        )}
+        {format.customized && (
+          <button className="btn-quiet" onClick={reset} disabled={saving}>
+            Reset to default
+          </button>
+        )}
+        <button className="btn-primary" onClick={() => void save(draft)} disabled={!dirty || invalid || saving}>
+          Save layout
+        </button>
+      </div>
+      {(hasEmpty || hasDuplicate) && (
+        <p className="hint" style={{ fontSize: 11.5, marginTop: 8, color: "var(--danger)" }}>
+          {hasEmpty ? "Every column needs a header." : "Column headers must be unique."}
+        </p>
+      )}
+      <p className="hint" style={{ fontSize: 11.5, marginTop: 10 }}>
+        Each column is filled from the chosen metadata field; "Blank" columns are left empty for you to complete
+        before uploading. Keywords are joined with "{format.keywordSeparator}". Comma-separated, UTF-8, one row per
+        file.{format.note ? ` ${format.note}` : ""} Export it from the Library pipeline's Export CSV step.
+      </p>
+    </div>
+  );
+}
+
+/** SFTP/FTPS delivery settings for one site (moved here from Connections). */
+function DeliveryCard({ siteName }: { siteName: string }) {
+  const app = useApp();
+  const support = deliverySupportFor(siteName);
+  const existing = deliveryProfileFor(app.sftpProfiles, siteName);
+  const [draft, setDraft] = useState<SftpDraft>(BLANK_SFTP_DRAFT);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    setDraft(
+      existing
+        ? {
+            name: existing.name,
+            site: existing.site,
+            protocol: existing.protocol,
+            host: existing.host,
+            port: existing.port,
+            username: existing.username,
+            remote_dir: existing.remote_dir,
+            password: "",
+          }
+        : { ...BLANK_SFTP_DRAFT, ...support.defaults, name: siteName }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteName, app.sftpProfiles]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      if (existing) await app.editSftpProfile(existing.id, draft);
+      else await app.addSftpProfile(draft);
+    } catch (err) {
+      app.setStatus(`Could not save delivery settings: ${String(err)}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function test() {
+    if (!existing) return;
+    setTesting(true);
+    try {
+      await app.testSftpConnection(existing);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function remove() {
+    if (!existing) return;
+    if (!window.confirm(`Remove the delivery settings for "${siteName}"? The saved password is removed too.`)) return;
+    await app.removeSftpProfile(existing);
+  }
+
+  return (
+    <div className="card">
+      <div className="site-card-head">
+        <h3 className="card-title">Delivery</h3>
+        {support.supported && existing && <span className="chip-tag chip-tag--ok">{existing.protocol.toUpperCase()} configured</span>}
+        {!support.supported && <span className="chip-tag chip-tag--neutral">not supported</span>}
+      </div>
+      <p className="hint" style={{ fontSize: 11.5, marginTop: 0 }}>
+        {support.note}
+      </p>
+      {support.supported && (
+        <>
+          <div className="pill-select" style={{ marginTop: 8 }}>
+            {(["sftp", "ftps"] as const).map((proto) => (
+              <button
+                key={proto}
+                className={`pill${draft.protocol === proto ? " pill--active" : ""}`}
+                onClick={() =>
+                  setDraft((d) => ({
+                    ...d,
+                    protocol: proto,
+                    port: d.port === (proto === "sftp" ? 21 : 22) ? (proto === "sftp" ? 22 : 21) : d.port,
+                  }))
+                }
+              >
+                {proto.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <div className="transport-grid" style={{ marginTop: 12 }}>
+            <div className="field">
+              <span className="field-label">Host</span>
+              <input
+                className="mono"
+                value={draft.host}
+                onChange={(e) => setDraft({ ...draft, host: e.target.value })}
+                placeholder={draft.protocol === "ftps" ? "ftps.example.com" : "sftp.example.com"}
+              />
+            </div>
+            <div className="field">
+              <span className="field-label">Port</span>
+              <input
+                type="number"
+                value={draft.port}
+                onChange={(e) => setDraft({ ...draft, port: Number(e.target.value) || (draft.protocol === "ftps" ? 21 : 22) })}
+              />
+            </div>
+            <div className="field">
+              <span className="field-label">Username</span>
+              <input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} />
+            </div>
+            <div className="field">
+              <span className="field-label">Remote directory</span>
+              <input value={draft.remote_dir} onChange={(e) => setDraft({ ...draft, remote_dir: e.target.value })} />
+            </div>
+            <div className="field">
+              <span className="field-label">Password {existing && <span className="hint">(blank = keep existing)</span>}</span>
+              <input
+                type="password"
+                autoComplete="off"
+                value={draft.password}
+                onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn-primary" onClick={() => void save()} disabled={saving || !draft.host || !draft.username}>
+              {existing ? "Save delivery" : "Add delivery"}
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => void test()}
+              disabled={!existing || testing}
+              title={!existing ? "Save the delivery settings first" : ""}
+            >
+              {testing ? "Testing…" : "Test connection"}
+            </button>
+            {existing && (
+              <button className="btn-quiet" style={{ color: "var(--danger)" }} onClick={() => void remove()}>
+                Remove
+              </button>
+            )}
+          </div>
+          {existing && (
+            <div className="test-result">
+              <span className="test-result-dot" style={{ background: existing.host_key_fingerprint ? "var(--ok)" : "var(--off)" }} />
+              <span style={{ color: existing.host_key_fingerprint ? "var(--ok-ink)" : "var(--faint)" }}>
+                {existing.host_key_fingerprint
+                  ? existing.protocol === "ftps"
+                    ? "TLS certificate verified — connected successfully."
+                    : `Host key verified · fingerprint ${existing.host_key_fingerprint.slice(0, 16)}…`
+                  : "Not yet connected — verifies on first upload."}
+              </span>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -24,6 +24,7 @@ pub use csv_export::{export_csv, ExportRow};
 
 use crate::error::{CoreError, Result};
 use crate::metadata::GeneratedMetadata;
+use crate::models::MediaType;
 
 /// Where to find the exiftool binary for a project. Empty path means "look
 /// up `exiftool` on PATH".
@@ -66,20 +67,52 @@ pub struct EmbedOutcome {
 /// are cleared with an empty assignment before the new values are added --
 /// on a single exiftool invocation this replaces rather than appends, so
 /// re-embedding after a re-generation doesn't leave stale keywords behind.
-fn build_args(meta: &GeneratedMetadata) -> Vec<String> {
+///
+/// IPTC is a still-image metadata format and isn't defined for video
+/// containers (mp4/mov/etc): exiftool accepts `-IPTC:*` for a video file
+/// without erroring, but silently drops it, which used to leave title,
+/// description and keywords invisible in every video-aware tool even
+/// though the embed reported success. Videos instead get title/description
+/// written to the QuickTime `Keys` atom group (Apple's `com.apple.quicktime.*`
+/// asset metadata, read by Finder, QuickTime Player and most media/stock
+/// tools) -- but that key set has no "keywords" entry, and neither the
+/// legacy `UserData:Keywords` atom (`udta/kywd`, read by QuickTime-family
+/// tools) nor XMP-dc:Subject is what Windows Explorer's Properties > Details
+/// "Tags" field reads for mp4/mov. Confirmed by hand (manually setting Tags
+/// on a video from Explorer's own Properties dialog, then inspecting the
+/// result with exiftool): Explorer stores that field in the `udta/Xtra`
+/// box's `WM/Category` attribute, not `WM/Keywords` -- exiftool exposes it
+/// as `Microsoft:Category`, so keywords are written there too.
+fn build_args(meta: &GeneratedMetadata, media_type: MediaType) -> Vec<String> {
     let mut args = vec![
         "-overwrite_original".to_string(),
         "-codedcharacterset=utf8".to_string(),
-        format!("-IPTC:ObjectName={}", meta.title),
         format!("-XMP-dc:Title={}", meta.title),
-        format!("-IPTC:Caption-Abstract={}", meta.description),
         format!("-XMP-dc:Description={}", meta.description),
-        "-IPTC:Keywords=".to_string(),
         "-XMP-dc:Subject=".to_string(),
     ];
+    match media_type {
+        MediaType::Image => {
+            args.push(format!("-IPTC:ObjectName={}", meta.title));
+            args.push(format!("-IPTC:Caption-Abstract={}", meta.description));
+            args.push("-IPTC:Keywords=".to_string());
+        }
+        MediaType::Video => {
+            args.push(format!("-Keys:Title={}", meta.title));
+            args.push(format!("-Keys:Description={}", meta.description));
+            args.push("-UserData:Keywords=".to_string());
+            args.push("-Microsoft:Category=".to_string());
+        }
+    }
     for kw in &meta.keywords {
-        args.push(format!("-IPTC:Keywords={kw}"));
         args.push(format!("-XMP-dc:Subject={kw}"));
+        match media_type {
+            MediaType::Image => args.push(format!("-IPTC:Keywords={kw}")),
+            MediaType::Video => {
+                args.push(format!("-UserData:Keywords={kw}"));
+                args.push(format!("-Microsoft:Category={kw}"));
+            }
+        }
     }
     args
 }
@@ -97,8 +130,15 @@ pub fn embed_metadata(
     meta: &GeneratedMetadata,
     config: &EmbedConfig,
 ) -> Result<EmbedOutcome> {
+    let media_type = path
+        .as_ref()
+        .extension()
+        .and_then(|e| e.to_str())
+        .and_then(MediaType::from_extension)
+        .unwrap_or(MediaType::Image);
+
     let output = Command::new(config.binary())
-        .args(build_args(meta))
+        .args(build_args(meta, media_type))
         .arg(path.as_ref())
         .output()
         .map_err(tool_error)?;
@@ -152,7 +192,7 @@ mod tests {
 
     #[test]
     fn args_include_title_description_and_each_keyword() {
-        let args = build_args(&sample_meta());
+        let args = build_args(&sample_meta(), MediaType::Image);
         assert!(args.contains(&"-IPTC:ObjectName=A dog in a park".to_string()));
         assert!(args.contains(&"-XMP-dc:Title=A dog in a park".to_string()));
         assert!(args.contains(&"-IPTC:Caption-Abstract=A golden retriever runs across a sunlit park.".to_string()));
@@ -164,7 +204,7 @@ mod tests {
 
     #[test]
     fn list_tags_are_cleared_before_being_repopulated() {
-        let args = build_args(&sample_meta());
+        let args = build_args(&sample_meta(), MediaType::Image);
         let clear_pos = args.iter().position(|a| a == "-IPTC:Keywords=").unwrap();
         let first_kw_pos = args.iter().position(|a| a == "-IPTC:Keywords=dog").unwrap();
         assert!(clear_pos < first_kw_pos);
@@ -172,7 +212,33 @@ mod tests {
 
     #[test]
     fn overwrite_original_is_always_set() {
-        assert!(build_args(&sample_meta()).contains(&"-overwrite_original".to_string()));
+        assert!(build_args(&sample_meta(), MediaType::Image).contains(&"-overwrite_original".to_string()));
+    }
+
+    #[test]
+    fn video_args_use_quicktime_keys_instead_of_iptc() {
+        let args = build_args(&sample_meta(), MediaType::Video);
+        assert!(!args.iter().any(|a| a.starts_with("-IPTC:")));
+        assert!(args.contains(&"-Keys:Title=A dog in a park".to_string()));
+        assert!(args.contains(&"-Keys:Description=A golden retriever runs across a sunlit park.".to_string()));
+        assert!(args.contains(&"-UserData:Keywords=dog".to_string()));
+        assert!(args.contains(&"-UserData:Keywords=park".to_string()));
+        assert!(args.contains(&"-Microsoft:Category=dog".to_string()));
+        assert!(args.contains(&"-Microsoft:Category=park".to_string()));
+        assert!(args.contains(&"-XMP-dc:Subject=dog".to_string()));
+        assert!(args.contains(&"-XMP-dc:Subject=park".to_string()));
+    }
+
+    #[test]
+    fn video_list_tags_are_cleared_before_being_repopulated() {
+        let args = build_args(&sample_meta(), MediaType::Video);
+        let clear_pos = args.iter().position(|a| a == "-UserData:Keywords=").unwrap();
+        let first_kw_pos = args.iter().position(|a| a == "-UserData:Keywords=dog").unwrap();
+        assert!(clear_pos < first_kw_pos);
+
+        let ms_clear_pos = args.iter().position(|a| a == "-Microsoft:Category=").unwrap();
+        let ms_first_kw_pos = args.iter().position(|a| a == "-Microsoft:Category=dog").unwrap();
+        assert!(ms_clear_pos < ms_first_kw_pos);
     }
 
     #[test]

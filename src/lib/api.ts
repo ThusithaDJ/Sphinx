@@ -266,12 +266,13 @@ export function setLimiterProfile(
   return invoke("set_limiter_profile", { projectId, profile });
 }
 
-/** Built-in presets plus any custom site profiles the project has added. */
+/** Built-in presets the project hasn't deleted, plus its custom site profiles. */
 export function listSiteProfiles(projectId: number): Promise<LimiterProfile[]> {
   return invoke("list_site_profiles", { projectId });
 }
 
-/** Add (or edit, by re-adding with the same name) a custom site profile. */
+/** Add (or edit, by re-adding with the same name) a custom site profile, or
+ * restore a deleted built-in. Resolves to the full visible list. */
 export function addSiteProfile(
   projectId: number,
   profile: LimiterProfile
@@ -279,7 +280,8 @@ export function addSiteProfile(
   return invoke("add_site_profile", { projectId, profile });
 }
 
-/** Remove a custom site profile by name. */
+/** Delete a site profile by name (built-in or custom). Resolves to the full
+ * visible list. */
 export function removeSiteProfile(projectId: number, name: string): Promise<LimiterProfile[]> {
   return invoke("remove_site_profile", { projectId, name });
 }
@@ -330,11 +332,31 @@ export function checkExiftool(projectId: number): Promise<string> {
   return invoke("check_exiftool", { projectId });
 }
 
+/** One stock site's edited metadata for an asset (editor's "Preview as"). */
+export interface SiteMetadata {
+  site_name: string;
+  metadata: GeneratedMetadata;
+  updated_at: string;
+}
+
+export function listSiteMetadata(assetId: number): Promise<SiteMetadata[]> {
+  return invoke("list_site_metadata", { assetId });
+}
+
+export function setSiteMetadata(assetId: number, siteName: string, metadata: GeneratedMetadata): Promise<void> {
+  return invoke("set_site_metadata", { assetId, siteName, metadata });
+}
+
+export function deleteSiteMetadata(assetId: number, siteName: string): Promise<void> {
+  return invoke("delete_site_metadata", { assetId, siteName });
+}
+
 export function embedAssetMetadata(
   projectId: number,
-  assetId: number
+  assetId: number,
+  siteName?: string
 ): Promise<EmbedOutcome> {
-  return invoke("embed_asset_metadata", { projectId, assetId });
+  return invoke("embed_asset_metadata", { projectId, assetId, siteName: siteName ?? null });
 }
 
 export function exportMetadataCsv(
@@ -369,6 +391,15 @@ export interface EnrichResponse {
   errors: string[];
 }
 
+/** Raw JSON of the project's user-edited CSV layouts (see lib/csvFormats). */
+export function getCsvLayouts(projectId: number): Promise<string | null> {
+  return invoke("get_csv_layouts", { projectId });
+}
+
+export function setCsvLayouts(projectId: number, json: string): Promise<void> {
+  return invoke("set_csv_layouts", { projectId, json });
+}
+
 export function getKeywordConfig(projectId: number): Promise<KeywordConfig | null> {
   return invoke("get_keyword_config", { projectId });
 }
@@ -400,6 +431,7 @@ export interface Job {
   source: string;
   payload_json: string;
   attempts: number;
+  not_before: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -409,15 +441,28 @@ export interface JobCounts {
   running: number;
   done: number;
   failed: number;
+  cancelled: number;
+}
+
+/** One recorded status-change event for a job (queued, started, retried,
+ * done/failed), oldest first -- the real per-job history, as opposed to
+ * `Job.status`/`error` which each new transition overwrites. */
+export interface JobEvent {
+  id: number;
+  job_id: number;
+  status: string;
+  message: string;
+  at: string;
 }
 
 export function enqueueBatch(
   projectId: number,
   assetIds: number[],
   jobType: QueueJobType,
-  profileId?: number
+  profileId?: number,
+  siteName?: string
 ): Promise<Job[]> {
-  return invoke("enqueue_batch", { projectId, assetIds, jobType, profileId: profileId ?? null });
+  return invoke("enqueue_batch", { projectId, assetIds, jobType, profileId: profileId ?? null, siteName: siteName ?? null });
 }
 
 export function listQueueJobs(limit = 100): Promise<Job[]> {
@@ -432,6 +477,20 @@ export function retryJob(jobId: number): Promise<void> {
   return invoke("retry_job", { jobId });
 }
 
+export function cancelJob(jobId: number): Promise<void> {
+  return invoke("cancel_job", { jobId });
+}
+
+/** Deletes finished (done/failed/cancelled) queue jobs: the given ids, or
+ * every finished job with `status` when no ids are passed. */
+export function removeJobs(opts: { jobIds?: number[]; status?: string }): Promise<number> {
+  return invoke("remove_jobs", { jobIds: opts.jobIds ?? null, status: opts.status ?? null });
+}
+
+export function listJobEvents(jobId: number): Promise<JobEvent[]> {
+  return invoke("list_job_events", { jobId });
+}
+
 /** Fires whenever a queue job's status changes (claimed, done, failed). */
 export function onJobUpdated(handler: (job: Job) => void): Promise<UnlistenFn> {
   return listen<Job>("job-updated", (event) => handler(event.payload));
@@ -440,12 +499,14 @@ export function onJobUpdated(handler: (job: Job) => void): Promise<UnlistenFn> {
 // --- SPHIN-6: SFTP upload ----------------------------------------------------
 
 export type SftpSite = "generic" | "adobe_stock";
+export type TransportProtocol = "sftp" | "ftps";
 
 export interface SftpProfile {
   id: number;
   project_id: number;
   name: string;
   site: SftpSite;
+  protocol: TransportProtocol;
   host: string;
   port: number;
   username: string;
@@ -462,18 +523,20 @@ export function listSftpProfiles(projectId: number): Promise<SftpProfile[]> {
 
 export function createSftpProfile(
   projectId: number,
-  profile: { name: string; site: SftpSite; host: string; port: number; username: string; remote_dir: string },
+  profile: { name: string; site: SftpSite; protocol: TransportProtocol; host: string; port: number; username: string; remote_dir: string },
   password: string
 ): Promise<SftpProfile> {
-  return invoke("create_sftp_profile", { projectId, ...profile, password });
+  const { remote_dir, ...rest } = profile;
+  return invoke("create_sftp_profile", { projectId, ...rest, remoteDir: remote_dir, password });
 }
 
 export function updateSftpProfile(
   id: number,
-  profile: { name: string; site: SftpSite; host: string; port: number; username: string; remote_dir: string },
+  profile: { name: string; site: SftpSite; protocol: TransportProtocol; host: string; port: number; username: string; remote_dir: string },
   password?: string
 ): Promise<void> {
-  return invoke("update_sftp_profile", { id, ...profile, password: password || null });
+  const { remote_dir, ...rest } = profile;
+  return invoke("update_sftp_profile", { id, ...rest, remoteDir: remote_dir, password: password || null });
 }
 
 export function deleteSftpProfile(id: number): Promise<void> {
@@ -482,4 +545,11 @@ export function deleteSftpProfile(id: number): Promise<void> {
 
 export function uploadAsset(profileId: number, assetId: number): Promise<void> {
   return invoke("upload_asset", { profileId, assetId });
+}
+
+/** Connects and authenticates against a saved profile without transferring a
+ * file. Resolves with the host key fingerprint seen (and pinned, same as a
+ * real upload) on success. */
+export function testSftpConnection(profileId: number): Promise<string> {
+  return invoke("test_sftp_connection", { profileId });
 }

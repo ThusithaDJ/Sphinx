@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 import { useApp, type Screen } from "../state/AppContext";
 
 const DESTINATIONS: { id: Screen; label: string }[] = [
+  { id: "home", label: "Home" },
   { id: "import", label: "Import" },
   { id: "library", label: "Library" },
-  { id: "review", label: "Review" },
-  { id: "queue", label: "Queue" },
+  { id: "activity", label: "Activity" },
   { id: "sites", label: "Sites" },
+  { id: "connections", label: "Connections" },
   { id: "settings", label: "Settings" },
+  { id: "about", label: "About" },
 ];
 
 interface EditorHeader {
@@ -26,7 +28,7 @@ export function NavBar({ right, editor }: { right?: ReactNode; editor?: EditorHe
       {editor ? (
         <div className="navbar-editor-head">
           <button className="link-action" onClick={editor.onBack}>
-            ← Library
+            ← Back to Library
           </button>
           <span className="navbar-divider" />
           <span className="navbar-filename">{editor.fileName}</span>
@@ -39,7 +41,6 @@ export function NavBar({ right, editor }: { right?: ReactNode; editor?: EditorHe
         <>
           <div className="navbar-brand">
             <span className="navbar-wordmark">Sphinx</span>
-            <span className="navbar-project">Default project</span>
           </div>
           <span className="navbar-divider" />
           <div className="navbar-destinations">
@@ -50,11 +51,8 @@ export function NavBar({ right, editor }: { right?: ReactNode; editor?: EditorHe
                 onClick={() => app.setScreen(d.id)}
               >
                 {d.label}
-                {d.id === "library" && <span className="nav-count"> {app.assetTotal}</span>}
-                {d.id === "review" && app.needsReviewIds.length > 0 && (
-                  <span className="nav-count"> {app.needsReviewIds.length}</span>
-                )}
-                {d.id === "queue" && (app.jobCounts.running || app.jobCounts.pending) > 0 && (
+                {d.id === "library" && app.assetTotal > 0 && <span className="nav-count"> {app.assetTotal}</span>}
+                {d.id === "activity" && (app.jobCounts.running || app.jobCounts.pending) > 0 && (
                   <span className="nav-count"> {app.jobCounts.running + app.jobCounts.pending}</span>
                 )}
               </button>

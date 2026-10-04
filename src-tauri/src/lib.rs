@@ -1,17 +1,21 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 use serde::Serialize;
 use sphinx_core::analysis::{AnalysisConfig, AnalysisResult};
 use sphinx_core::db::JobCounts;
 use sphinx_core::embed::{EmbedConfig, EmbedOutcome, ExportRow};
-use sphinx_core::keywords::{AdobeStockProvider, KeywordConfig, KeywordProvider, ShutterstockProvider};
+use sphinx_core::keywords::{
+    AdobeStockProvider, KeywordConfig, KeywordProvider, ShutterstockProvider, SiteCredentials,
+};
 use sphinx_core::metadata::{GeneratedMetadata, LimiterProfile};
-use sphinx_core::models::{AnalysisRecord, Asset, IngestOutcome, Job, MetadataRecord, Project, SftpProfileRecord};
+use sphinx_core::models::{
+    AnalysisRecord, Asset, IngestOutcome, Job, JobEvent, MetadataRecord, Project, SftpProfileRecord,
+};
 use sphinx_core::secrets;
 use sphinx_core::transcribe::TranscriptionConfig;
-use sphinx_core::upload::{SftpProfile, SftpSite};
+use sphinx_core::upload::{SftpProfile, SftpSite, TransportProtocol};
 use sphinx_core::video::VideoConfig;
 use sphinx_core::watch::WatchHandle;
 use sphinx_core::{analysis, db, embed, ingest, metadata, upload, video};
@@ -25,6 +29,9 @@ use tauri::{Emitter, Manager};
 struct AppState {
     db: Mutex<Connection>,
     watch: Mutex<Option<WatchHandle>>,
+    /// The queue job the worker is currently executing (id + a handle to wake
+    /// it for cancellation), if any. `None` between jobs.
+    running_job: Mutex<Option<(i64, Arc<tokio::sync::Notify>)>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -171,6 +178,150 @@ fn delete_asset(state: tauri::State<AppState>, asset_id: i64) -> Result<(), Stri
     db::delete_asset(&conn, asset_id).map_err(|e| e.to_string())
 }
 
+// --- API keys in the OS credential store --------------------------------------
+//
+// Provider configs live in `project_settings`, but their API keys don't: every
+// save moves the key into the OS credential store (see `secrets`) and writes
+// the config with it blanked; every load fills it back in.
+
+/// Credential-store name for one of a project's API keys.
+fn api_key_name(project_id: i64, purpose: &str) -> String {
+    format!("project-{project_id}-{purpose}")
+}
+
+/// Move `key` into the credential store under `name` and blank it so it's
+/// never written to `sphinx.db`. An empty key drops any stored one.
+fn stash_api_key(name: &str, key: &mut String) -> Result<(), String> {
+    if key.trim().is_empty() {
+        // Best effort: a provider with no key (Ollama) shouldn't need a
+        // working credential store just to be saved.
+        let _ = secrets::delete_api_key(name);
+    } else {
+        secrets::set_api_key(name, key.trim()).map_err(|e| e.to_string())?;
+    }
+    key.clear();
+    Ok(())
+}
+
+/// Fill a blank `key` from the credential store. A key still in the config
+/// is a legacy plaintext one the startup migration couldn't move: keep it.
+/// An unreadable store just leaves the key empty, so the provider reports a
+/// missing key rather than the whole settings screen failing to load.
+fn fill_api_key(name: &str, key: &mut String) {
+    if key.is_empty() {
+        if let Ok(Some(stored)) = secrets::get_api_key(name) {
+            *key = stored;
+        }
+    }
+}
+
+fn analysis_key_name(project_id: i64, config: &AnalysisConfig) -> String {
+    api_key_name(project_id, &format!("analysis-{}", config.provider.as_str()))
+}
+
+fn stash_analysis_key(project_id: i64, config: &mut AnalysisConfig) -> Result<(), String> {
+    let name = analysis_key_name(project_id, config);
+    stash_api_key(&name, &mut config.api_key)
+}
+
+fn keyword_slots(config: &mut KeywordConfig) -> [(&'static str, &mut Option<SiteCredentials>); 2] {
+    [
+        ("keywords-shutterstock", &mut config.shutterstock),
+        ("keywords-adobe-stock", &mut config.adobe_stock),
+    ]
+}
+
+fn load_analysis_config(conn: &Connection, project_id: i64) -> Result<Option<AnalysisConfig>, String> {
+    let mut config = db::get_analysis_config(conn, project_id).map_err(|e| e.to_string())?;
+    if let Some(c) = config.as_mut() {
+        fill_api_key(&analysis_key_name(project_id, c), &mut c.api_key);
+    }
+    Ok(config)
+}
+
+fn load_analysis_configs(
+    conn: &Connection,
+    project_id: i64,
+) -> Result<std::collections::HashMap<String, AnalysisConfig>, String> {
+    let mut configs = db::get_analysis_configs(conn, project_id).map_err(|e| e.to_string())?;
+    for c in configs.values_mut() {
+        fill_api_key(&analysis_key_name(project_id, c), &mut c.api_key);
+    }
+    Ok(configs)
+}
+
+fn load_keyword_config(conn: &Connection, project_id: i64) -> Result<Option<KeywordConfig>, String> {
+    let mut config = db::get_keyword_config(conn, project_id).map_err(|e| e.to_string())?;
+    if let Some(cfg) = config.as_mut() {
+        for (purpose, creds) in keyword_slots(cfg) {
+            if let Some(c) = creds {
+                fill_api_key(&api_key_name(project_id, purpose), &mut c.api_key);
+            }
+        }
+    }
+    Ok(config)
+}
+
+fn load_transcription_config(conn: &Connection, project_id: i64) -> Result<Option<TranscriptionConfig>, String> {
+    let mut config = db::get_transcription_config(conn, project_id).map_err(|e| e.to_string())?;
+    if let Some(c) = config.as_mut() {
+        fill_api_key(&api_key_name(project_id, "transcription"), &mut c.api_key);
+    }
+    Ok(config)
+}
+
+/// Move API keys that earlier versions saved in plaintext into the credential
+/// store. Runs at every startup but only acts on non-empty stored keys. A key
+/// that can't be moved stays in the database (and keeps working) rather than
+/// being lost; the next launch tries again.
+fn migrate_plaintext_api_keys(conn: &Connection) {
+    let Ok(projects) = db::list_projects(conn) else { return };
+    for project in projects {
+        let pid = project.id;
+
+        // The active config first: saving it also rewrites its entry in the
+        // per-provider map, so the loop below won't see that key again.
+        if let Ok(Some(mut active)) = db::get_analysis_config(conn, pid) {
+            if !active.api_key.is_empty() && stash_analysis_key(pid, &mut active).is_ok() {
+                let _ = db::set_analysis_config(conn, pid, &active);
+            }
+        }
+        if let Ok(mut configs) = db::get_analysis_configs(conn, pid) {
+            let mut changed = false;
+            for c in configs.values_mut() {
+                if !c.api_key.is_empty() && stash_analysis_key(pid, c).is_ok() {
+                    changed = true;
+                }
+            }
+            if changed {
+                let _ = db::set_analysis_configs(conn, pid, &configs);
+            }
+        }
+
+        if let Ok(Some(mut cfg)) = db::get_keyword_config(conn, pid) {
+            let mut changed = false;
+            for (purpose, creds) in keyword_slots(&mut cfg) {
+                if let Some(c) = creds {
+                    if !c.api_key.is_empty() && stash_api_key(&api_key_name(pid, purpose), &mut c.api_key).is_ok() {
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                let _ = db::set_keyword_config(conn, pid, &cfg);
+            }
+        }
+
+        if let Ok(Some(mut cfg)) = db::get_transcription_config(conn, pid) {
+            if !cfg.api_key.is_empty()
+                && stash_api_key(&api_key_name(pid, "transcription"), &mut cfg.api_key).is_ok()
+            {
+                let _ = db::set_transcription_config(conn, pid, &cfg);
+            }
+        }
+    }
+}
+
 // --- projects & analysis config (SPHIN-2 / SPHIN-17) --------------------------
 
 #[tauri::command]
@@ -192,15 +343,16 @@ fn get_analysis_config(
     project_id: i64,
 ) -> Result<Option<AnalysisConfig>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::get_analysis_config(&conn, project_id).map_err(|e| e.to_string())
+    load_analysis_config(&conn, project_id)
 }
 
 #[tauri::command]
 fn set_analysis_config(
     state: tauri::State<AppState>,
     project_id: i64,
-    config: AnalysisConfig,
+    mut config: AnalysisConfig,
 ) -> Result<(), String> {
+    stash_analysis_key(project_id, &mut config)?;
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::set_analysis_config(&conn, project_id, &config).map_err(|e| e.to_string())
 }
@@ -214,7 +366,7 @@ fn get_analysis_configs(
     project_id: i64,
 ) -> Result<std::collections::HashMap<String, AnalysisConfig>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::get_analysis_configs(&conn, project_id).map_err(|e| e.to_string())
+    load_analysis_configs(&conn, project_id)
 }
 
 /// Check whether a local Ollama server is reachable, returning a short
@@ -228,8 +380,7 @@ async fn check_ollama(
 ) -> Result<String, String> {
     let config = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
-        db::get_analysis_configs(&conn, project_id)
-            .map_err(|e| e.to_string())?
+        load_analysis_configs(&conn, project_id)?
             .get("ollama")
             .cloned()
             .unwrap_or_else(|| AnalysisConfig::new(analysis::ProviderKind::Ollama))
@@ -300,8 +451,7 @@ async fn analyze_asset(
 ) -> Result<AnalysisResponse, String> {
     let (config, asset, video_config, transcription_config) = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
-        let config = db::get_analysis_config(&conn, project_id)
-            .map_err(|e| e.to_string())?
+        let config = load_analysis_config(&conn, project_id)?
             .ok_or_else(|| "no analysis provider configured for this project".to_string())?;
         let asset = db::get_asset(&conn, asset_id)
             .map_err(|e| e.to_string())?
@@ -309,8 +459,7 @@ async fn analyze_asset(
         let video_config = db::get_video_config(&conn, project_id)
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
-        let transcription_config = db::get_transcription_config(&conn, project_id)
-            .map_err(|e| e.to_string())?;
+        let transcription_config = load_transcription_config(&conn, project_id)?;
         (config, asset, video_config, transcription_config)
     };
 
@@ -398,15 +547,16 @@ fn get_transcription_config(
     project_id: i64,
 ) -> Result<Option<TranscriptionConfig>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::get_transcription_config(&conn, project_id).map_err(|e| e.to_string())
+    load_transcription_config(&conn, project_id)
 }
 
 #[tauri::command]
 fn set_transcription_config(
     state: tauri::State<AppState>,
     project_id: i64,
-    config: TranscriptionConfig,
+    mut config: TranscriptionConfig,
 ) -> Result<(), String> {
+    stash_api_key(&api_key_name(project_id, "transcription"), &mut config.api_key)?;
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::set_transcription_config(&conn, project_id, &config).map_err(|e| e.to_string())
 }
@@ -440,22 +590,20 @@ fn set_limiter_profile(
     db::set_limiter_profile(&conn, project_id, &profile).map_err(|e| e.to_string())
 }
 
-/// Every site profile available to a project: the fixed built-in presets
-/// plus any custom ones the project has added (SPHIN-19 follow-up).
+/// Every site profile available to a project: the built-in presets it
+/// hasn't deleted plus any custom ones it has added (SPHIN-19 follow-up).
 #[tauri::command]
 fn list_site_profiles(
     state: tauri::State<AppState>,
     project_id: i64,
 ) -> Result<Vec<LimiterProfile>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let mut profiles = LimiterProfile::built_ins();
-    profiles.extend(db::get_custom_site_profiles(&conn, project_id).map_err(|e| e.to_string())?);
-    Ok(profiles)
+    db::list_site_profiles(&conn, project_id).map_err(|e| e.to_string())
 }
 
-/// Add (or edit, by re-adding with the same name) a custom site profile.
-/// Returns the project's full custom-profile list. Errors if `profile.name`
-/// is blank or collides with a built-in preset name.
+/// Add (or edit, by re-adding with the same name) a custom site profile, or
+/// restore a deleted built-in preset of the same name. Returns the project's
+/// full visible site-profile list.
 #[tauri::command]
 fn add_site_profile(
     state: tauri::State<AppState>,
@@ -463,11 +611,11 @@ fn add_site_profile(
     profile: LimiterProfile,
 ) -> Result<Vec<LimiterProfile>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::add_custom_site_profile(&conn, project_id, profile).map_err(|e| e.to_string())
+    db::add_site_profile(&conn, project_id, profile).map_err(|e| e.to_string())
 }
 
-/// Remove a custom site profile by name. Built-in presets can't be removed
-/// this way (they aren't stored as custom profiles to begin with).
+/// Delete a site profile by name -- built-in presets are hidden for the
+/// project, custom ones removed. Returns the full visible list.
 #[tauri::command]
 fn remove_site_profile(
     state: tauri::State<AppState>,
@@ -475,7 +623,7 @@ fn remove_site_profile(
     name: String,
 ) -> Result<Vec<LimiterProfile>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::remove_custom_site_profile(&conn, project_id, &name).map_err(|e| e.to_string())
+    db::remove_site_profile(&conn, project_id, &name).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -554,6 +702,32 @@ fn set_metadata(
     metadata_response(record)
 }
 
+/// Every per-site metadata draft saved for an asset (asset editor's
+/// "Preview as" switch).
+#[tauri::command]
+fn list_site_metadata(state: tauri::State<AppState>, asset_id: i64) -> Result<Vec<db::SiteMetadata>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::list_site_metadata(&conn, asset_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_site_metadata(
+    state: tauri::State<AppState>,
+    asset_id: i64,
+    site_name: String,
+    metadata: GeneratedMetadata,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::upsert_site_metadata(&conn, asset_id, &site_name, &metadata).map_err(|e| e.to_string())
+}
+
+/// Drop a site's draft so it falls back to the AI-generated default.
+#[tauri::command]
+fn delete_site_metadata(state: tauri::State<AppState>, asset_id: i64, site_name: String) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::delete_site_metadata(&conn, asset_id, &site_name).map_err(|e| e.to_string())
+}
+
 // --- metadata embedding (SPHIN-4) --------------------------------------------
 
 #[tauri::command]
@@ -615,16 +789,27 @@ async fn embed_asset_metadata(
     state: tauri::State<'_, AppState>,
     project_id: i64,
     asset_id: i64,
+    site_name: Option<String>,
 ) -> Result<EmbedOutcome, String> {
     let (path, meta, config) = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         let asset = db::get_asset(&conn, asset_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("asset {asset_id} not found"))?;
-        let record = db::latest_metadata_for_asset(&conn, asset_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "metadata has not been generated yet".to_string())?;
-        let meta = metadata_from_record(&record)?;
+        // A site's edited draft wins over the AI-generated default.
+        let site_draft = match site_name.as_deref() {
+            Some(site) => db::get_site_metadata(&conn, asset_id, site).map_err(|e| e.to_string())?,
+            None => None,
+        };
+        let meta = match site_draft {
+            Some(m) => m,
+            None => {
+                let record = db::latest_metadata_for_asset(&conn, asset_id)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "metadata has not been generated yet".to_string())?;
+                metadata_from_record(&record)?
+            }
+        };
         let config = db::get_embed_config(&conn, project_id)
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
@@ -696,15 +881,36 @@ fn get_keyword_config(
     project_id: i64,
 ) -> Result<Option<KeywordConfig>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::get_keyword_config(&conn, project_id).map_err(|e| e.to_string())
+    load_keyword_config(&conn, project_id)
+}
+
+#[tauri::command]
+fn get_csv_layouts(state: tauri::State<AppState>, project_id: i64) -> Result<Option<String>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_csv_layouts(&conn, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_csv_layouts(state: tauri::State<AppState>, project_id: i64, json: String) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::set_csv_layouts(&conn, project_id, &json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn set_keyword_config(
     state: tauri::State<AppState>,
     project_id: i64,
-    config: KeywordConfig,
+    mut config: KeywordConfig,
 ) -> Result<(), String> {
+    for (purpose, creds) in keyword_slots(&mut config) {
+        let name = api_key_name(project_id, purpose);
+        match creds {
+            Some(c) => stash_api_key(&name, &mut c.api_key)?,
+            None => {
+                let _ = secrets::delete_api_key(&name);
+            }
+        }
+    }
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::set_keyword_config(&conn, project_id, &config).map_err(|e| e.to_string())
 }
@@ -735,9 +941,7 @@ async fn enrich_keywords(
         let record = db::latest_metadata_for_asset(&conn, asset_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "metadata has not been generated yet".to_string())?;
-        let config = db::get_keyword_config(&conn, project_id)
-            .map_err(|e| e.to_string())?
-            .unwrap_or_default();
+        let config = load_keyword_config(&conn, project_id)?.unwrap_or_default();
         if config.shutterstock.is_none() && config.adobe_stock.is_none() {
             return Err("no keyword-enrichment provider configured for this project".to_string());
         }
@@ -856,6 +1060,11 @@ async fn enrich_keywords(
 
 const QUEUE_JOB_TYPES: [&str; 5] = ["analyze", "generate_metadata", "embed", "enrich_keywords", "upload"];
 const QUEUE_POLL_INTERVAL_MS: u64 = 400;
+/// Safety-net ceiling on a single claimed job, on top of any timeout its own
+/// implementation sets internally (e.g. SFTP's connect/IO timeouts). Without
+/// this, a job whose underlying call hangs with no timeout of its own would
+/// block the single worker -- and every job queued behind it -- forever.
+const JOB_TIMEOUT_SECS: u64 = 180;
 /// After this many automatic retries a job is left `failed` for manual
 /// retry rather than being rescheduled again. SPHIN-26.
 const MAX_AUTO_RETRIES: i64 = 3;
@@ -872,6 +1081,7 @@ fn enqueue_batch(
     asset_ids: Vec<i64>,
     job_type: String,
     profile_id: Option<i64>,
+    site_name: Option<String>,
 ) -> Result<Vec<Job>, String> {
     if !QUEUE_JOB_TYPES.contains(&job_type.as_str()) {
         return Err(format!("unknown job type: {job_type}"));
@@ -879,7 +1089,8 @@ fn enqueue_batch(
     if job_type == "upload" && profile_id.is_none() {
         return Err("upload jobs require an SFTP profile_id".to_string());
     }
-    let payload = serde_json::json!({ "project_id": project_id, "profile_id": profile_id }).to_string();
+    let payload =
+        serde_json::json!({ "project_id": project_id, "profile_id": profile_id, "site_name": site_name }).to_string();
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     db::enqueue_jobs(&conn, &asset_ids, &job_type, &payload).map_err(|e| e.to_string())
 }
@@ -904,12 +1115,59 @@ fn retry_job(state: tauri::State<AppState>, job_id: i64) -> Result<(), String> {
     db::retry_job(&conn, job_id).map_err(|e| e.to_string())
 }
 
+/// Cancel a queue job. If it's still `pending`, it's marked `cancelled`
+/// directly and the worker will never claim it. If it's the job the worker
+/// is currently running, wake the worker's cancellation signal instead --
+/// see [`spawn_job_worker`]'s `notify.notified()` branch. A job that's
+/// already `done`/`failed`/`cancelled` is a silent no-op.
+#[tauri::command]
+fn cancel_job(state: tauri::State<AppState>, job_id: i64) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    if db::cancel_pending_job(&conn, job_id).map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    drop(conn);
+    if let Ok(running) = state.running_job.lock() {
+        if let Some((id, notify)) = running.as_ref() {
+            if *id == job_id {
+                notify.notify_one();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Remove finished queue jobs from Activity: the given ids, or (with no ids)
+/// every finished job with `status`. Pending/running jobs are left alone.
+#[tauri::command]
+fn remove_jobs(
+    state: tauri::State<AppState>,
+    job_ids: Option<Vec<i64>>,
+    status: Option<String>,
+) -> Result<usize, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::delete_finished_jobs(&conn, job_ids.as_deref(), status.as_deref()).map_err(|e| e.to_string())
+}
+
+/// The full status-change history for one job (queued, started, retried,
+/// done/failed), each with its own timestamp -- what Activity's per-job log
+/// renders, replacing a synthesized 2-3 line summary with what actually
+/// happened.
+#[tauri::command]
+fn list_job_events(state: tauri::State<AppState>, job_id: i64) -> Result<Vec<JobEvent>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::list_job_events(&conn, job_id).map_err(|e| e.to_string())
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct QueueJobPayload {
     #[serde(default = "default_project_id")]
     project_id: i64,
     #[serde(default)]
     profile_id: Option<i64>,
+    /// Target site whose edited metadata draft an `embed` job should write.
+    #[serde(default)]
+    site_name: Option<String>,
 }
 
 fn default_project_id() -> i64 {
@@ -924,6 +1182,7 @@ async fn execute_queue_job(app: &tauri::AppHandle, job: &Job) -> Result<(), Stri
     let payload: QueueJobPayload = serde_json::from_str(&job.payload_json).unwrap_or(QueueJobPayload {
         project_id: 1,
         profile_id: None,
+        site_name: None,
     });
     let state: tauri::State<'_, AppState> = app.state();
 
@@ -932,7 +1191,7 @@ async fn execute_queue_job(app: &tauri::AppHandle, job: &Job) -> Result<(), Stri
             .await
             .map(|_| ()),
         "generate_metadata" => generate_metadata(state, payload.project_id, job.asset_id).map(|_| ()),
-        "embed" => embed_asset_metadata(state, payload.project_id, job.asset_id)
+        "embed" => embed_asset_metadata(state, payload.project_id, job.asset_id, payload.site_name.clone())
             .await
             .map(|_| ()),
         "enrich_keywords" => enrich_keywords(state, payload.project_id, job.asset_id)
@@ -955,6 +1214,14 @@ async fn execute_queue_job(app: &tauri::AppHandle, job: &Job) -> Result<(), Stri
 /// process and don't need an actual socket between them. One job at a time
 /// keeps this simple and naturally respects external rate limits (SPHIN-24)
 /// without extra coordination.
+/// How a claimed job's execution wound down: either it ran to completion (or
+/// timed out, which looks the same as any other failure downstream), or the
+/// user cancelled it via [`cancel_job`] while it was running.
+enum JobOutcome {
+    Finished(Result<(), String>),
+    Cancelled,
+}
+
 fn spawn_job_worker(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -974,10 +1241,48 @@ fn spawn_job_worker(app: tauri::AppHandle) {
 
             let _ = app.emit("job-updated", &job);
 
-            let result = execute_queue_job(&app, &job).await;
+            // Tracked so `cancel_job` can wake `notify.notified()` below for
+            // a job that's already running (a still-pending job is cancelled
+            // directly in the DB instead, without needing this).
+            let notify = Arc::new(tokio::sync::Notify::new());
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let mut running = state.running_job.lock().unwrap();
+                *running = Some((job.id, notify.clone()));
+            }
 
-            let updated = match &result {
-                Ok(()) => {
+            let outcome = tokio::select! {
+                r = execute_queue_job(&app, &job) => JobOutcome::Finished(r),
+                _ = tokio::time::sleep(std::time::Duration::from_secs(JOB_TIMEOUT_SECS)) => {
+                    JobOutcome::Finished(Err(format!(
+                        "{} job timed out after {}s with no response",
+                        job.job_type, JOB_TIMEOUT_SECS
+                    )))
+                }
+                _ = notify.notified() => JobOutcome::Cancelled,
+            };
+
+            {
+                let state: tauri::State<'_, AppState> = app.state();
+                let mut running = state.running_job.lock().unwrap();
+                *running = None;
+            }
+
+            let updated = match outcome {
+                JobOutcome::Cancelled => {
+                    let state: tauri::State<'_, AppState> = app.state();
+                    let conn = match state.db.lock() {
+                        Ok(c) => c,
+                        Err(_) => break,
+                    };
+                    let _ = db::set_job_status(&conn, job.id, "cancelled", Some("Cancelled by user"));
+                    Job {
+                        status: "cancelled".to_string(),
+                        error: Some("Cancelled by user".to_string()),
+                        ..job
+                    }
+                }
+                JobOutcome::Finished(Ok(())) => {
                     let state: tauri::State<'_, AppState> = app.state();
                     let conn = match state.db.lock() {
                         Ok(c) => c,
@@ -990,7 +1295,7 @@ fn spawn_job_worker(app: tauri::AppHandle) {
                         ..job
                     }
                 }
-                Err(e) => {
+                JobOutcome::Finished(Err(e)) => {
                     if job.attempts < MAX_AUTO_RETRIES {
                         let delay = BACKOFF_SCHEDULE_SECS
                             [(job.attempts as usize).min(BACKOFF_SCHEDULE_SECS.len() - 1)];
@@ -999,7 +1304,7 @@ fn spawn_job_worker(app: tauri::AppHandle) {
                             Ok(c) => c,
                             Err(_) => break,
                         };
-                        let _ = db::schedule_retry(&conn, job.id, delay, e);
+                        let _ = db::schedule_retry(&conn, job.id, delay, &e);
                         Job {
                             status: "pending".to_string(),
                             error: Some(e.clone()),
@@ -1012,7 +1317,7 @@ fn spawn_job_worker(app: tauri::AppHandle) {
                             Ok(c) => c,
                             Err(_) => break,
                         };
-                        let _ = db::set_job_status(&conn, job.id, "failed", Some(e));
+                        let _ = db::set_job_status(&conn, job.id, "failed", Some(&e));
                         Job {
                             status: "failed".to_string(),
                             error: Some(e.clone()),
@@ -1035,11 +1340,19 @@ fn site_to_str(site: &str) -> SftpSite {
     }
 }
 
+fn protocol_to_str(protocol: &str) -> TransportProtocol {
+    match protocol {
+        "ftps" => TransportProtocol::Ftps,
+        _ => TransportProtocol::Sftp,
+    }
+}
+
 fn sftp_profile_from_record(r: &SftpProfileRecord) -> SftpProfile {
     SftpProfile {
         id: r.id,
         name: r.name.clone(),
         site: site_to_str(&r.site),
+        protocol: protocol_to_str(&r.protocol),
         host: r.host.clone(),
         port: r.port as u16,
         username: r.username.clone(),
@@ -1058,11 +1371,13 @@ fn list_sftp_profiles(state: tauri::State<AppState>, project_id: i64) -> Result<
 /// Create a connection profile and save its password (if given) in the OS
 /// credential store. SPHIN-25.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn create_sftp_profile(
     state: tauri::State<AppState>,
     project_id: i64,
     name: String,
     site: String,
+    protocol: String,
     host: String,
     port: i64,
     username: String,
@@ -1070,7 +1385,7 @@ fn create_sftp_profile(
     password: String,
 ) -> Result<SftpProfileRecord, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let profile = db::create_sftp_profile(&conn, project_id, &name, &site, &host, port, &username, &remote_dir)
+    let profile = db::create_sftp_profile(&conn, project_id, &name, &site, &protocol, &host, port, &username, &remote_dir)
         .map_err(|e| e.to_string())?;
     if !password.is_empty() {
         secrets::set_secret(&profile.credential_key, &password).map_err(|e| e.to_string())?;
@@ -1087,6 +1402,7 @@ fn update_sftp_profile(
     id: i64,
     name: String,
     site: String,
+    protocol: String,
     host: String,
     port: i64,
     username: String,
@@ -1094,7 +1410,7 @@ fn update_sftp_profile(
     password: Option<String>,
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    db::update_sftp_profile(&conn, id, &name, &site, &host, port, &username, &remote_dir)
+    db::update_sftp_profile(&conn, id, &name, &site, &protocol, &host, port, &username, &remote_dir)
         .map_err(|e| e.to_string())?;
     if let Some(pw) = password {
         if !pw.is_empty() {
@@ -1164,6 +1480,36 @@ async fn upload_asset(
     Ok(())
 }
 
+/// Connect and authenticate against a saved SFTP profile without
+/// transferring a file, so credentials/reachability can be checked before
+/// (or without) a real upload. Pins the host key the same way a real upload
+/// does, so a successful test also satisfies trust-on-first-use.
+#[tauri::command]
+async fn test_sftp_connection(state: tauri::State<'_, AppState>, profile_id: i64) -> Result<String, String> {
+    let (record, password) = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        let record = db::get_sftp_profile(&conn, profile_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("SFTP profile {profile_id} not found"))?;
+        let password = secrets::get_secret(&record.credential_key)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no password saved for this SFTP profile".to_string())?;
+        (record, password)
+    };
+
+    let profile = sftp_profile_from_record(&record);
+    let outcome = tauri::async_runtime::spawn_blocking(move || upload::test_connection(&profile, &password))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    if record.host_key_fingerprint.as_deref() != Some(outcome.host_key_fingerprint.as_str()) {
+        let _ = db::set_sftp_host_key_fingerprint(&conn, record.id, &outcome.host_key_fingerprint);
+    }
+    Ok(outcome.host_key_fingerprint)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1175,9 +1521,11 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("sphinx.db");
             let conn = db::open(db_path)?;
+            migrate_plaintext_api_keys(&conn);
             app.manage(AppState {
                 db: Mutex::new(conn),
                 watch: Mutex::new(None),
+                running_job: Mutex::new(None),
             });
             spawn_job_worker(app.handle().clone());
             Ok(())
@@ -1213,6 +1561,9 @@ pub fn run() {
             get_metadata,
             generate_metadata,
             set_metadata,
+            list_site_metadata,
+            set_site_metadata,
+            delete_site_metadata,
             get_embed_config,
             set_embed_config,
             check_exiftool,
@@ -1220,16 +1571,22 @@ pub fn run() {
             export_metadata_csv,
             get_keyword_config,
             set_keyword_config,
+            get_csv_layouts,
+            set_csv_layouts,
             enrich_keywords,
             enqueue_batch,
             list_queue_jobs,
             queue_job_counts,
             retry_job,
+            cancel_job,
+            remove_jobs,
+            list_job_events,
             list_sftp_profiles,
             create_sftp_profile,
             update_sftp_profile,
             delete_sftp_profile,
             upload_asset,
+            test_sftp_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

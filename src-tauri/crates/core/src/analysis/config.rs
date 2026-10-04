@@ -64,8 +64,8 @@ impl ProviderKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisConfig {
     pub provider: ProviderKind,
-    /// The provider API key. Stored as-is for now; SPHIN-25 introduces
-    /// encrypted credential storage that this will move behind.
+    /// The provider API key. Persisted in the OS credential store, never in
+    /// `sphinx.db` (the Tauri layer strips it before saving the config).
     #[serde(default)]
     pub api_key: String,
     /// Model id; empty string means "use the provider default".

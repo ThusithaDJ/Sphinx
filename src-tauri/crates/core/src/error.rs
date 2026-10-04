@@ -43,6 +43,9 @@ pub enum CoreError {
     /// Connecting, authenticating, or transferring over SFTP failed.
     #[error("SFTP error: {0}")]
     Sftp(String),
+    /// Connecting, authenticating, or transferring over FTPS failed.
+    #[error("FTPS error: {0}")]
+    Ftps(String),
     /// A caller-supplied value failed a validation rule (e.g. a duplicate or
     /// blank site profile name). Message is user-facing as-is.
     #[error("{0}")]

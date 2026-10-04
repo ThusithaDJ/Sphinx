@@ -1,31 +1,34 @@
 import "./App.css";
 import { AppProvider, useApp } from "./state/AppContext";
+import { HomeScreen } from "./routes/HomeScreen";
 import { ImportScreen } from "./routes/ImportScreen";
 import { LibraryScreen } from "./routes/LibraryScreen";
-import { AssetEditorScreen } from "./routes/AssetEditorScreen";
-import { ReviewScreen } from "./routes/ReviewScreen";
-import { QueueScreen } from "./routes/QueueScreen";
+import { ActivityScreen } from "./routes/ActivityScreen";
 import { SitesScreen } from "./routes/SitesScreen";
+import { ConnectionsScreen } from "./routes/ConnectionsScreen";
 import { SettingsScreen } from "./routes/SettingsScreen";
+import { AboutScreen } from "./routes/AboutScreen";
 import { ToastStack } from "./components/Toast";
 
 function Router() {
   const app = useApp();
   switch (app.screen) {
+    case "home":
+      return <HomeScreen />;
     case "import":
       return <ImportScreen />;
     case "library":
       return <LibraryScreen />;
-    case "editor":
-      return <AssetEditorScreen />;
-    case "review":
-      return <ReviewScreen />;
-    case "queue":
-      return <QueueScreen />;
+    case "activity":
+      return <ActivityScreen />;
     case "sites":
       return <SitesScreen />;
+    case "connections":
+      return <ConnectionsScreen />;
     case "settings":
       return <SettingsScreen />;
+    case "about":
+      return <AboutScreen />;
   }
 }
 

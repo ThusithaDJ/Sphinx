@@ -20,10 +20,34 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self' ipc: http://ipc.localhost",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: http://asset.localhost https://cdn.buymeacoffee.com data: blob:",
+        "media-src": "'self' asset: http://asset.localhost blob:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
+      },
+      "devCsp": {
+        "default-src": "'self' ipc: http://ipc.localhost",
+        "script-src": "'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: http://asset.localhost https://cdn.buymeacoffee.com data: blob:",
+        "media-src": "'self' asset: http://asset.localhost blob:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420",
+        "object-src": "'none'"
+      },
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": {
+          "allow": ["**"],
+          "deny": ["$APPDATA/**", "$APPLOCALDATA/**", "$APPCONFIG/**"]
+        }
       }
     }
   },
@@ -46,6 +70,9 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    },
+    "macOS": {
+      "signingIdentity": "-"
     }
   }
 }

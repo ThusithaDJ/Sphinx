@@ -29,5 +29,15 @@ tempfile = "=3.10.1"
 russh = "0.45"
 russh-sftp = "2"
 async-trait = "0.1"
-keyring = { version = "3", features = ["windows-native"] }
+# FTPS (explicit FTP over TLS) delivery -- some stock sites (e.g. Shutterstock)
+# only offer this, not SFTP. Sync blocking API. rustls (not native-tls): many
+# FTPS servers require the data-channel TLS session to resume the control
+# channel's session ("require_ssl_reuse") and drop it otherwise; suppaftp's
+# rustls backend shares one Arc<ClientConfig> (with rustls's session cache)
+# across both connections, native-tls's does not. Pure Rust, no new toolchain.
+suppaftp = { version = "6", features = ["rustls"] }
+webpki-roots = "0.26"
+# One native backend per OS: without a platform feature keyring silently
+# falls back to an in-memory mock store and saved credentials vanish on exit.
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent", "crypto-rust"] }
 tokio = { version = "1", features = ["rt", "time"] }

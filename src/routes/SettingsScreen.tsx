@@ -1,23 +1,31 @@
 import { useEffect, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { NavBar } from "../components/NavBar";
 import { StatusStrip } from "../components/StatusStrip";
-import { useApp, PROVIDER_LABELS } from "../state/AppContext";
-import type { ProviderKind } from "../lib/api";
+import { useApp } from "../state/AppContext";
 
 const SIDEBAR_ITEMS = [
-  { id: "ai-provider", label: "AI provider" },
   { id: "prompt-guidance", label: "Prompt & guidance" },
-  { id: "local-tools", label: "Local tools" },
+  { id: "video-pipeline", label: "Video pipeline" },
+  { id: "storage", label: "Storage & data" },
+  { id: "shortcuts", label: "Shortcuts" },
 ];
 
 export function SettingsScreen() {
   const app = useApp();
-  const isOllama = app.analysisConfig.provider === "ollama";
-  const [active, setActive] = useState("ai-provider");
+  const [active, setActive] = useState("prompt-guidance");
   const contentRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [savingAnalysis, setSavingAnalysis] = useState(false);
+  const [savingVideo, setSavingVideo] = useState(false);
+  const [maxKeyframes, setMaxKeyframes] = useState(app.videoConfig.max_keyframes);
+  const [sceneThreshold, setSceneThreshold] = useState(app.videoConfig.scene_threshold);
+  const [transcribe, setTranscribe] = useState(app.transcriptionConfig.enabled);
+
+  useEffect(() => {
+    setMaxKeyframes(app.videoConfig.max_keyframes);
+    setSceneThreshold(app.videoConfig.scene_threshold);
+    setTranscribe(app.transcriptionConfig.enabled);
+  }, [app.videoConfig, app.transcriptionConfig]);
 
   useEffect(() => {
     const root = contentRef.current;
@@ -50,16 +58,17 @@ export function SettingsScreen() {
     }
   }
 
-  async function pickExiftool() {
-    const selection = await open({ multiple: false });
-    if (!selection || Array.isArray(selection)) return;
-    await app.saveEmbedConfig({ exiftool_path: selection });
-  }
-
-  async function pickFfmpeg() {
-    const selection = await open({ multiple: false });
-    if (!selection || Array.isArray(selection)) return;
-    await app.saveVideoConfig({ ...app.videoConfig, ffmpeg_path: selection }, app.transcriptionConfig);
+  async function handleSaveVideo() {
+    setSavingVideo(true);
+    try {
+      await app.saveVideoConfig(
+        { ...app.videoConfig, max_keyframes: maxKeyframes, scene_threshold: sceneThreshold },
+        { ...app.transcriptionConfig, enabled: transcribe }
+      );
+      app.setStatus("Saved video pipeline settings.");
+    } finally {
+      setSavingVideo(false);
+    }
   }
 
   return (
@@ -79,95 +88,6 @@ export function SettingsScreen() {
         </div>
 
         <div className="settings-content" ref={contentRef}>
-          <div
-            className="card"
-            id="ai-provider"
-            ref={(el) => {
-              sectionRefs.current["ai-provider"] = el;
-            }}
-          >
-            <div className="settings-card-head">
-              <h3 className="card-title">AI provider</h3>
-              {app.hasKey && <span className="chip-tag chip-tag--ok">connected</span>}
-            </div>
-            <div className="field-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-              <div className="field">
-                <span className="field-label">Provider</span>
-                <select
-                  value={app.analysisConfig.provider}
-                  onChange={(e) => app.switchAnalysisProvider(e.target.value as ProviderKind)}
-                >
-                  {(Object.keys(PROVIDER_LABELS) as ProviderKind[]).map((p) => (
-                    <option key={p} value={p}>
-                      {PROVIDER_LABELS[p]}
-                      {app.savedAnalysisConfigs[p] ? " (configured)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <span className="field-label">
-                  Vision model <span className="hint">(blank = provider default)</span>
-                </span>
-                <input
-                  value={app.analysisConfig.model}
-                  onChange={(e) => app.patchAnalysisConfig({ model: e.target.value })}
-                  placeholder={isOllama ? "e.g. llava, qwen2-vl" : "e.g. gpt-4o"}
-                />
-              </div>
-              <div className="field">
-                <span className="field-label">
-                  API key {isOllama && <span className="hint">(optional — only for a proxied/authenticated server)</span>}
-                </span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={app.analysisConfig.api_key}
-                  onChange={(e) => app.patchAnalysisConfig({ api_key: e.target.value })}
-                  placeholder={isOllama ? "leave blank for a local server" : "sk-live-…"}
-                />
-              </div>
-              <div className="field">
-                <span className="field-label">
-                  {isOllama ? "Server URL" : "API base URL"} <span className="hint">(blank = provider default)</span>
-                </span>
-                <input
-                  value={app.analysisConfig.base_url}
-                  onChange={(e) => app.patchAnalysisConfig({ base_url: e.target.value })}
-                  placeholder={isOllama ? "http://localhost:11434" : "proxy / gateway override"}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
-              <button className="btn-primary" onClick={() => void handleSaveAnalysis()} disabled={savingAnalysis}>
-                {savingAnalysis ? "Saving…" : "Save"}
-              </button>
-              <button className="btn-secondary" disabled title="A live test request isn't wired up yet">
-                Test request
-              </button>
-            </div>
-            {isOllama ? (
-              <>
-                <p className="settings-footer-note">
-                  {app.ollama.checking
-                    ? "Checking the local Ollama server…"
-                    : app.ollama.ok
-                    ? `Ollama reachable — ${app.ollama.detail}`
-                    : `Ollama not reachable at this server URL — ${app.ollama.detail}`}
-                </p>
-                {app.gpu && !app.gpu.available && (
-                  <p className="settings-footer-note" style={{ color: "var(--warn-ink)" }}>
-                    {app.gpu.detail}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="settings-footer-note">
-                Key is stored locally in sphinx.db and never leaves this machine except to the provider.
-              </p>
-            )}
-          </div>
-
           <div
             className="card"
             id="prompt-guidance"
@@ -221,51 +141,63 @@ export function SettingsScreen() {
 
           <div
             className="card"
-            id="local-tools"
+            id="video-pipeline"
+            ref={(el) => {
+              sectionRefs.current["video-pipeline"] = el;
+            }}
+          >
+            <h3 className="card-title" style={{ marginBottom: 14 }}>
+              Video pipeline
+            </h3>
+            <div className="field-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+              <div className="field">
+                <span className="field-label">
+                  Max keyframes <span className="hint">(per video, at scene changes)</span>
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  value={maxKeyframes}
+                  onChange={(e) => setMaxKeyframes(Number(e.target.value) || 1)}
+                />
+              </div>
+              <div className="field">
+                <span className="field-label">
+                  Scene threshold <span className="hint">(0–1, lower = more keyframes)</span>
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={sceneThreshold}
+                  onChange={(e) => setSceneThreshold(Number(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+            <label className="embed-target-row" style={{ marginTop: 12 }}>
+              <input type="checkbox" checked={transcribe} onChange={(e) => setTranscribe(e.target.checked)} />
+              Transcribe audio alongside keyframes
+            </label>
+            <div style={{ marginTop: 14 }}>
+              <button className="btn-primary" onClick={() => void handleSaveVideo()} disabled={savingVideo}>
+                {savingVideo ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <p className="settings-footer-note">ffmpeg's own path is managed under Connections → Local tools & runtime.</p>
+          </div>
+
+          <div
+            className="card"
+            id="storage"
             style={{ padding: "15px 0 11px" }}
             ref={(el) => {
-              sectionRefs.current["local-tools"] = el;
+              sectionRefs.current["storage"] = el;
             }}
           >
             <h3 className="card-title" style={{ padding: "0 18px" }}>
-              Local tools
+              Storage & data
             </h3>
-            <div className="tool-row">
-              <span className="tool-status-dot" style={{ background: app.exiftool.checking ? "var(--off)" : app.exiftool.ok ? "var(--ok)" : "var(--warn)" }} />
-              <div className="tool-row-body">
-                <span className="tool-name">exiftool</span>
-                <span className="tool-detail">{app.embedConfig.exiftool_path || "on PATH"} · {app.exiftool.detail}</span>
-              </div>
-              <button className="btn-quiet" onClick={() => void pickExiftool()}>
-                Change
-              </button>
-            </div>
-            <div className="tool-row">
-              <span className="tool-status-dot" style={{ background: app.ffmpeg.checking ? "var(--off)" : app.ffmpeg.ok ? "var(--ok)" : "var(--warn)" }} />
-              <div className="tool-row-body">
-                <span className="tool-name">
-                  ffmpeg <span style={{ fontSize: 11.5, color: "var(--warn-ink)", fontWeight: 400 }}>required for video</span>
-                </span>
-                <span className="tool-detail">
-                  {app.ffmpeg.ok ? `${app.videoConfig.ffmpeg_path || "on PATH"} · ${app.ffmpeg.detail}` : "not found in PATH — video assets stay blocked"}
-                </span>
-              </div>
-              <button className="btn-secondary" style={{ color: "var(--accent)" }} onClick={() => void pickFfmpeg()}>
-                Locate…
-              </button>
-            </div>
-            <div className="tool-row">
-              <span
-                className="tool-status-dot"
-                style={{ background: !app.gpu ? "var(--off)" : app.gpu.available ? "var(--ok)" : "var(--warn)" }}
-              />
-              <div className="tool-row-body">
-                <span className="tool-name">
-                  GPU <span style={{ fontSize: 11.5, color: "var(--warn-ink)", fontWeight: 400 }}>speeds up local models</span>
-                </span>
-                <span className="tool-detail">{app.gpu?.detail ?? "checking…"}</span>
-              </div>
-            </div>
             <div className="tool-row">
               <span className="tool-status-dot" style={{ background: "var(--ok)" }} />
               <div className="tool-row-body">
@@ -275,6 +207,32 @@ export function SettingsScreen() {
               <button className="btn-quiet" disabled title="The database path isn't exposed to the UI yet">
                 Reveal
               </button>
+            </div>
+          </div>
+
+          <div
+            className="card"
+            id="shortcuts"
+            ref={(el) => {
+              sectionRefs.current["shortcuts"] = el;
+            }}
+          >
+            <h3 className="card-title" style={{ marginBottom: 14 }}>
+              Shortcuts
+            </h3>
+            <div className="field-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div className="field">
+                <span className="field-label">Library → Triage</span>
+                <span className="settings-footer-note" style={{ margin: 0 }}>
+                  J / K move · Enter approve · E edit · R reject · S skip
+                </span>
+              </div>
+              <div className="field">
+                <span className="field-label">Library → Asset detail</span>
+                <span className="settings-footer-note" style={{ margin: 0 }}>
+                  Ctrl+S save · Ctrl+Enter approve and next · Alt+1–4 preview site
+                </span>
+              </div>
             </div>
           </div>
         </div>

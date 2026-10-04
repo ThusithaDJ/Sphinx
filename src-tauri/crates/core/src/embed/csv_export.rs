@@ -20,14 +20,22 @@ pub fn export_csv(rows: &[ExportRow]) -> String {
         let keywords = row.metadata.keywords.join("; ");
         out.push_str(&csv_field(row.file_name));
         out.push(',');
-        out.push_str(&csv_field(&row.metadata.title));
+        out.push_str(&csv_field(text_cell(&row.metadata.title)));
         out.push(',');
-        out.push_str(&csv_field(&row.metadata.description));
+        out.push_str(&csv_field(text_cell(&row.metadata.description)));
         out.push(',');
-        out.push_str(&csv_field(&keywords));
+        out.push_str(&csv_field(text_cell(&keywords)));
         out.push('\n');
     }
     out
+}
+
+/// Strip leading characters that make Excel/Sheets evaluate a cell as a
+/// formula (`=`, `+`, `-`, `@`, tab, CR), so metadata from a crafted file or
+/// a misbehaving model can't run one when the CSV is opened. Not applied to
+/// the filename column, which must match the file on disk exactly.
+fn text_cell(s: &str) -> &str {
+    s.trim_start_matches(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r' | ' '))
 }
 
 fn csv_field(s: &str) -> String {
@@ -41,6 +49,14 @@ fn csv_field(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_cells_cannot_start_a_formula() {
+        let m = meta("=HYPERLINK(\"http://x\")", "@SUM(1)", &["+cmd", "sky"]);
+        let csv = export_csv(&[ExportRow { file_name: "a.jpg", metadata: &m }]);
+        let row = csv.lines().nth(1).unwrap();
+        assert_eq!(row, "a.jpg,\"HYPERLINK(\"\"http://x\"\")\",SUM(1),cmd; sky");
+    }
 
     fn meta(title: &str, description: &str, keywords: &[&str]) -> GeneratedMetadata {
         GeneratedMetadata {

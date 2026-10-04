@@ -41,11 +41,46 @@ export interface Keyword {
   confidence: number;
   /** Site demand index, 0-100. Undefined when the term is unscored (shows "--"). */
   demand?: number;
+  /** Typed in by the user rather than produced by AI/enrichment: rendered
+   * green and never scored. */
+  userAdded?: boolean;
 }
 
+/** Heat-band colours, plus green for user-added terms -- shared by the chips
+ * and the keyword-field legend. */
+export const USER_ADDED_COLORS: HeatColors = {
+  bg: "rgba(26,127,55,.12)",
+  border: "rgba(26,127,55,.45)",
+  text: "#1a6b33",
+};
+
+export const HEAT_LEGEND: { label: string; range: string; colors: HeatColors }[] = [
+  { label: "Hot", range: "79+", colors: { bg: "rgba(217,98,43,.14)", border: "rgba(217,98,43,.42)", text: "#8f3d16" } },
+  { label: "Warm", range: "56–78", colors: { bg: "rgba(232,178,122,.20)", border: "rgba(211,155,96,.42)", text: "#7a4f21" } },
+  { label: "Cool", range: "33–55", colors: { bg: "rgba(207,214,221,.50)", border: "rgba(180,190,201,.60)", text: "#3d434c" } },
+  { label: "Cold", range: "0–32", colors: { bg: "#f4f2ee", border: "#e0dcd3", text: "#5f5a51" } },
+];
+
 export function keywordHeat(kw: Keyword): number | null {
-  if (kw.demand === undefined) return null;
+  if (kw.userAdded || kw.demand === undefined) return null;
   return heat(kw.confidence, kw.demand);
+}
+
+/** Highest heat first; unscored keywords sink to the end. Stable for ties. */
+export function sortKeywordsByHeat(kws: Keyword[]): Keyword[] {
+  return [...kws].sort((a, b) => (keywordHeat(b) ?? -1) - (keywordHeat(a) ?? -1));
+}
+
+/** Inserts each new keyword before the first existing one it outscores,
+ * leaving the existing (possibly hand-arranged) order untouched. */
+export function insertKeywordsByHeat(existing: Keyword[], added: Keyword[]): Keyword[] {
+  const out = [...existing];
+  for (const kw of sortKeywordsByHeat(added)) {
+    const h = keywordHeat(kw) ?? -1;
+    const at = out.findIndex((k) => (keywordHeat(k) ?? -1) < h);
+    out.splice(at === -1 ? out.length : at, 0, kw);
+  }
+  return out;
 }
 
 // The vision/metadata API returns keywords as a plain ordered string[] --

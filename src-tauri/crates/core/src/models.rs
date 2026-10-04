@@ -74,6 +74,19 @@ fn default_job_payload() -> String {
     "{}".to_string()
 }
 
+/// One recorded status transition for a job -- queued, started, retried,
+/// done/failed -- each with its own timestamp and message, so Activity can
+/// show the real history a job went through instead of only its current
+/// `status`/`error` (which each new transition overwrites on `jobs` itself).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobEvent {
+    pub id: i64,
+    pub job_id: i64,
+    pub status: String,
+    pub message: String,
+    pub at: String,
+}
+
 /// A row in the `sftp_profiles` table: a named SFTP connection profile for
 /// one stock site (SPHIN-25). The password lives in the OS credential store
 /// under `credential_key`, never here.
@@ -83,6 +96,7 @@ pub struct SftpProfileRecord {
     pub project_id: i64,
     pub name: String,
     pub site: String,
+    pub protocol: String,
     pub host: String,
     pub port: i64,
     pub username: String,
