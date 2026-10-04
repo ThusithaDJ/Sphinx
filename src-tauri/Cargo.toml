@@ -1,6 +1,6 @@
 [package]
 name = "sphinx"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sphinx: AI-assisted stock metadata generation for images and video"
 authors = ["Thusitha"]
 edition = "2021"
