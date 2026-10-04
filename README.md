@@ -1,122 +1,169 @@
 # Sphinx
 
-AI-assisted metadata generation for stock photo/video contributors: ingest local
-media, analyze it with vision models (cloud or local), generate
-title/description/keywords, embed IPTC/XMP, enrich keywords against stock-site
-APIs, and upload — all from a Tauri + React desktop app.
+**AI-assisted metadata for stock photo and video contributors.**
 
-Tracked in Jira project **SPHIN**. All ten epics (SPHIN-1 through SPHIN-10)
-are implemented:
+Sphinx is a free desktop app for Windows, macOS and Linux. Drop in your photos
+and videos, and it writes titles, descriptions and keywords for you, shaped to
+each stock site's rules. It embeds them into your files and uploads them to
+your contributor accounts.
 
-| Epic | Summary |
+## Features
+
+- **AI analysis**: describes each image or video with a vision model of your
+  choice. Cloud options are OpenAI, Google Gemini and Anthropic Claude; a local
+  [Ollama](https://ollama.com) model keeps everything on your machine.
+- **Per-site metadata**: titles, descriptions and keyword counts are trimmed
+  to each site's limits (Adobe Stock, Shutterstock and others, plus custom
+  site profiles). Edits can be saved separately for each site.
+- **Keyword editor**: keywords are scored and colour-coded by strength, and
+  can be reordered, removed, restored or enriched with real search-demand data
+  from Shutterstock and Adobe Stock.
+- **Video support**: extracts keyframes for analysis, with optional speech
+  transcription.
+- **Embedding and export**: writes IPTC/XMP metadata into your files with
+  exiftool, or exports each site's CSV upload format.
+- **Upload**: delivers files over SFTP or FTPS straight to your contributor
+  accounts.
+- **Batch jobs**: queue analysis, embedding and uploads for many files and
+  track them on the Activity screen.
+
+## Install
+
+Download the latest installer from the
+[**Releases**](https://github.com/ThusithaDJ/Sphinx/releases) page:
+
+| OS | File |
 | --- | --- |
-| SPHIN-1 | Ingestion & data layer — file picker/drag-drop, folder watch, BLAKE3 hashing/dedupe, SQLite schema |
-| SPHIN-2 | Media analysis (AI vision) — OpenAI, Gemini, Anthropic providers behind one `VisionProvider` trait |
-| SPHIN-3 | Metadata generation — title/description/keywords + limiter profiles per stock site |
-| SPHIN-4 | Metadata embedding — IPTC/XMP via `exiftool`, CSV export |
-| SPHIN-5 | Keyword enrichment — Shutterstock + Adobe Stock connectors with caching |
-| SPHIN-6 | Upload & distribution — SFTP (pure-Rust `russh`), connection profiles, credential store, retry/backoff |
-| SPHIN-7 | Job orchestration & UI — async batch queue with progress and retry |
-| SPHIN-8 | Video pipeline — keyframe extraction, optional Whisper transcription, video-aware vision prompting |
-| SPHIN-9 | Local AI model support — Ollama vision provider + GPU check |
-| SPHIN-10 | Desktop shell & settings — packaging/build pipeline for desktop distribution |
+| Windows 10/11 | `.exe` (setup) or `.msi` |
+| macOS (Apple Silicon / Intel) | `.dmg` for your chip (`aarch64` / `x64`) |
+| Linux | `.AppImage`, `.deb` or `.rpm` |
 
-The frontend has since been redesigned into a 7-screen workflow (Import →
-Queue → Review → Library → Asset Editor → Sites → Settings), with import
-progress, larger library previews, asset delete, custom site profiles, toast
-notifications, and working image/video preview in Review and Queue.
+> **First launch warning:** the installers aren't signed with a publisher
+> certificate yet, so your OS will warn you the first time:
+> - **Windows:** if SmartScreen says "Windows protected your PC", click
+>   **More info → Run anyway**.
+> - **macOS:** drag Sphinx to Applications and open it. When macOS says it
+>   can't verify the app, click **Done**, then go to **System Settings →
+>   Privacy & Security**, scroll down and click **Open Anyway** next to the
+>   Sphinx message. Confirm with your password, then click **Open Anyway**
+>   again. You only need to do this once.
+>
+>   If macOS instead says the app "is damaged", run this in Terminal, then
+>   open the app again:
+>   `xattr -dr com.apple.quarantine /Applications/Sphinx.app`
 
-## Architecture
+### Also install these two free tools
 
-- `src/` — React + TypeScript frontend (Vite). Screens live in `src/routes/`
-  (`ImportScreen`, `QueueScreen`, `ReviewScreen`, `LibraryScreen`,
-  `AssetEditorScreen`, `SitesScreen`, `SettingsScreen`); shared UI in
-  `src/components/` (nav bar, stage dots, status strip, keyword chips,
-  compliance table, toasts, toggles).
-- `src-tauri/` — Tauri v2 desktop shell (Rust). Exposes the engine as
-  `#[tauri::command]`s in `src-tauri/src/lib.rs`.
-- `src-tauri/crates/core/` (**`sphinx-core`**) — the engine, as a plain Rust
-  library with **no Tauri/GUI dependency**, so it can be built and unit
-  tested on its own (`cargo test -p sphinx-core`):
-  - `hash.rs` — streaming BLAKE3 content hashing.
-  - `db.rs` — SQLite schema/migrations (`assets`, `jobs`, `projects`,
-    `project_settings`, `analyses`, and later tables added by stepwise
-    migrations for metadata, enrichment, upload and video state).
-  - `ingest.rs` / `watch.rs` — ingest a path/batch/directory, deduping by
-    path and content hash; debounced recursive folder watching (`notify` +
-    `notify-debouncer-mini`) so a burst of filesystem events collapses into
-    one ingestion pass.
-  - `analysis/` — vision providers (`openai.rs`, `gemini.rs`,
-    `anthropic.rs`, `ollama.rs`) behind a shared `VisionProvider` trait, a
-    structured JSON prompt (`prompt.rs`), and `config.rs` for
-    `AnalysisConfig`/`ProviderKind`. Request shaping and response parsing are
-    unit-tested offline; no test touches the network.
-  - `metadata/` — limiter profiles that shape generated metadata to each
-    stock site's rules.
-  - `embed/` — IPTC/XMP embedding via `exiftool`, plus CSV export.
-  - `keywords/` — Shutterstock and Adobe Stock keyword-enrichment
-    connectors with an HTTP client and cache.
-  - `upload/` — SFTP upload (`russh`/`russh-sftp`), connection profiles, and
-    credential storage (`keyring`) with retry/backoff.
-  - `video/` — keyframe extraction and video-aware analysis input; pairs
-    with `transcribe/` for optional Whisper transcription.
-  - `gpu.rs` — local GPU capability check, used to decide whether the Ollama
-    provider is viable on this machine.
-  - `secrets.rs` — encrypted credential storage.
-  - `models.rs` — shared domain types (`Asset`, `Job`, `Project`,
-    `AnalysisRecord`, `IngestOutcome`, etc).
+Sphinx relies on them but doesn't bundle them:
 
-Database lives at the OS app-data directory (`sphinx.db`), created on first
-run via `tauri::AppHandle::path().app_data_dir()`.
+| Tool | Used for | Get it |
+| --- | --- | --- |
+| **ExifTool** | Writing metadata into your files | https://exiftool.org (macOS: `brew install exiftool`, Linux: `apt install libimage-exiftool-perl`) |
+| **FFmpeg** | Reading video keyframes and audio | https://ffmpeg.org (macOS: `brew install ffmpeg`, Linux: `apt install ffmpeg`) |
 
-## Getting started (Windows)
+Put both on your `PATH`, or set their locations under **Connections → Local tools**. The About
+screen shows whether Sphinx can find them.
 
-1. Install [Node.js](https://nodejs.org) (v18+) and [Rust](https://rustup.rs).
-2. Install the Tauri Windows prerequisites: the **MSVC C++ Build Tools**
-   (via Visual Studio Installer → "Desktop development with C++") and
-   **WebView2** (preinstalled on Windows 10/11; Tauri will prompt if missing).
-   See https://tauri.app/start/prerequisites/ for details.
-3. Install [`ffmpeg`](https://ffmpeg.org) and [`exiftool`](https://exiftool.org)
-   and make sure both are on `PATH` — they're used for video keyframe
-   extraction and IPTC/XMP embedding respectively.
-4. From the project root:
+## Quick start
 
-   ```
-   npm install
-   npm run tauri dev
-   ```
+1. **Connections**: choose an AI provider and paste its API key, or point
+   Sphinx at a local Ollama server. Optionally add SFTP/FTPS logins for your
+   stock sites, and keyword-API keys for enrichment.
+2. **Import**: add files or a folder. Sphinx can also watch a folder for new
+   files.
+3. **Library**: run the pipeline on new items (analyze, then generate
+   metadata), then review the results. Open any item in the editor to adjust
+   its title, description and keywords for each site.
+4. **Embed** the metadata into the files, then **upload** them or **export a
+   CSV** for the site.
 
-   This launches the app with hot reload. `npm run tauri build` produces an
-   installer (SPHIN-39 packaging pipeline).
+## Privacy and security
 
-5. Run the `sphinx-core` unit tests on their own at any time (no windowing
-   toolchain or network needed):
+- **No account, server, telemetry or tracking.** Sphinx runs entirely on your
+  computer.
+- **Passwords and API keys go into your operating system's credential store**
+  (Windows Credential Manager, macOS Keychain, or GNOME Keyring / KWallet on
+  Linux), never into Sphinx's database.
+- **Your media only leaves your machine when you choose a service:**
+  - A cloud AI provider receives the images or keyframes it analyses, under
+    that provider's own terms. Use Ollama to keep media local.
+  - Your SFTP/FTPS servers receive the files you upload.
 
-   ```
-   cd src-tauri/crates/core
-   cargo test
-   ```
+See [SECURITY.md](SECURITY.md) for details and how to report a vulnerability.
 
-### Configuring AI vision
+### Where your data lives
 
-In the app, open **Settings → AI vision**, pick a provider (OpenAI, Gemini,
-Claude, or a local Ollama model), paste an API key if needed, and Save. Cloud
-keys are stored encrypted in `sphinx.db` on this machine. Then run
-**Analyze** on an image or video asset to get a structured description +
-candidate keywords. Model, API base URL, and a project-specific prompt line
-are all optional overrides. For Ollama, Sphinx checks local GPU capability
-first and will warn if the machine looks too weak to run vision models
-locally.
+The library database (`sphinx.db`) is stored in:
 
-### Site profiles & upload
+| OS | Location |
+| --- | --- |
+| Windows | `%APPDATA%\com.thusitha.sphinx\` |
+| macOS | `~/Library/Application Support/com.thusitha.sphinx/` |
+| Linux | `~/.local/share/com.thusitha.sphinx/` |
 
-**Sites** lets you define custom stock-site profiles (metadata limiter rules)
-and SFTP connection profiles for upload. Credentials are stored via the OS
-credential store (`keyring`), never in plain text.
+Deleting that folder resets Sphinx. Saved credentials are listed in your OS
+credential store under `sphinx-sftp` and `sphinx-api-keys`. Sphinx never
+modifies or deletes your original files, except to write metadata into them
+when you embed.
 
-## Where things stand
+## Building from source
 
-This is implemented on the `ui-redesign` branch (not `main`) — the new
-7-screen UI, video pipeline, Ollama support, and packaging work all landed
-there. See `new_ui_design/REDESIGN-BRIEF.md` for the design rationale behind
-the current screens.
+Requirements:
+
+- [Node.js](https://nodejs.org) 18+
+- [Rust](https://rustup.rs) (stable)
+- The Tauri prerequisites for your OS: https://tauri.app/start/prerequisites/
+  - On Linux, also install `libdbus-1-dev` and `pkg-config` (needed for the
+    credential store).
+
+Then:
+
+```
+npm install
+npm run tauri dev      # run with hot reload
+npm run tauri build    # build an installer for your OS
+```
+
+Run the engine's unit tests (no network or windowing toolkit needed):
+
+```
+cd src-tauri/crates/core
+cargo test
+```
+
+### Project layout
+
+- `src/`: React + TypeScript frontend (Vite).
+  - Screens live in `src/routes/`.
+  - Shared UI lives in `src/components/`.
+  - App state is in `src/state/AppContext.tsx`.
+- `src-tauri/`: the Tauri v2 desktop shell. It exposes the engine to the
+  frontend as commands in `src-tauri/src/lib.rs`.
+- `src-tauri/crates/core/` (`sphinx-core`): the engine, a plain Rust library
+  with no GUI dependency.
+  - `db.rs`: SQLite schema and numbered migrations.
+  - `ingest.rs` / `watch.rs`: importing, BLAKE3 deduplication and folder
+    watching.
+  - `analysis/`: vision providers (OpenAI, Gemini, Anthropic, Ollama).
+  - `metadata/`: per-site limit profiles.
+  - `embed/`: exiftool embedding and CSV export.
+  - `keywords/`: Shutterstock and Adobe Stock enrichment.
+  - `video/` and `transcribe/`: keyframes and speech-to-text.
+  - `upload/`: SFTP (`russh`) and FTPS (`suppaftp`).
+  - `secrets.rs`: OS credential-store access.
+
+Releases are built by `.github/workflows/release.yml` when a `v*` tag is
+pushed.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Support the project
+
+If Sphinx saves you time, you can
+[buy me a coffee](https://www.buymeacoffee.com/thusithajaw) ☕
+
+## License
+
+[MIT](LICENSE) © Thusitha Jayasundara
